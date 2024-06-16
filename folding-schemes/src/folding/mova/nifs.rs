@@ -1,6 +1,6 @@
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
-use ark_ff::{PrimeField};
+use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseUVPolynomial;
 use ark_poly::MultilinearExtension;
@@ -238,7 +238,7 @@ where
                 &mleE2_prime,
                 &mleT_evaluated,
             )?,
-            Self::fold_witness(rho, w1, w2, &T)?
+            Self::fold_witness(rho, w1, w2, &T)?,
         ))
     }
 
@@ -314,6 +314,50 @@ where
             &proof.mleE2_prime,
             &proof.mleT,
         )
+    }
+
+    pub fn prove_expansion(
+        transcript: &mut impl Transcript<C>,
+        ci: &CommittedInstance<C>,
+        w: &Witness<C>,
+    ) -> Result<CommittedInstance<C>, Error> {
+        // accept only R1CS witness
+        if w.E.iter().any(|x| !x.is_zero()) {
+            return Err(Error::NotEqual);
+        }
+
+        let vars = log2(w.E.len()) as usize;
+
+        let rE_scalar = C::ScalarField::from_le_bytes_mod_order(b"rE");
+        transcript.absorb(&rE_scalar);
+        let rE: Vec<C::ScalarField> = transcript.get_challenges(vars);
+
+        Ok(CommittedInstance {
+            rE,
+            mleE: C::ScalarField::zero(),
+            u: ci.u,
+            cmW: ci.cmW,
+            x: ci.x.clone(),
+        })
+    }
+
+    // Do the verifier's expansion part.
+    pub fn verify_expansion(
+        transcript: &mut impl Transcript<C>,
+        ci: &CommittedInstance<C>,
+        n_vars_mleE: usize,
+    ) -> Result<CommittedInstance<C>, Error> {
+        let rE_scalar = C::ScalarField::from_le_bytes_mod_order(b"rE");
+        transcript.absorb(&rE_scalar);
+        let rE: Vec<C::ScalarField> = transcript.get_challenges(n_vars_mleE);
+
+        Ok(CommittedInstance {
+            rE,
+            mleE: C::ScalarField::zero(),
+            u: ci.u,
+            cmW: ci.cmW,
+            x: ci.x.clone(),
+        })
     }
 
     // /// Verify committed folded instance (ci) relations. Notice that this method does not open the

@@ -5,9 +5,9 @@ use ark_crypto_primitives::{
     sponge::{poseidon::PoseidonConfig, Absorb},
 };
 use ark_ec::{AffineRepr, CurveGroup, Group};
-use ark_ff::{ToConstraintField};
+use ark_ff::ToConstraintField;
 use ark_poly::MultilinearExtension;
-use ark_r1cs_std::{prelude::CurveVar};
+use ark_r1cs_std::prelude::CurveVar;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{fmt::Debug, log2};
@@ -16,25 +16,18 @@ use ark_std::{One, Zero};
 use std::usize;
 
 use crate::commitment::CommitmentScheme;
-use crate::folding::circuits::{
-    nonnative::{
-        affine::nonnative_affine_to_field_elements, uint::nonnative_field_to_field_elements,
-    },
+use crate::folding::circuits::nonnative::{
+    affine::nonnative_affine_to_field_elements, uint::nonnative_field_to_field_elements,
 };
 use crate::frontend::FCircuit;
 use crate::utils::vec::is_zero_vec;
 use crate::Error;
 
-use crate::{
-    utils::mle::{dense_vec_to_dense_mle},
-};
+use crate::utils::mle::dense_vec_to_dense_mle;
 
 pub mod nifs;
 pub mod traits;
 pub mod utils;
-
-
-
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CommittedInstance<C: CurveGroup> {
@@ -80,14 +73,16 @@ where
 
         CRH::<C::ScalarField>::evaluate(
             poseidon_config,
-            [vec![i],
+            [
+                vec![i],
                 z_0,
                 z_i,
                 vec![self.u],
                 self.x.clone(),
                 vec![self.mleE],
                 cmW_x,
-                cmW_y]
+                cmW_y,
+            ]
             .concat(),
         )
         .map_err(|e| Error::Other(e.to_string()))
