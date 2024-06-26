@@ -61,3 +61,7 @@ path = "../examples/multi_inputs.rs"
 [[example]]
 name = "external_inputs"
 path = "../examples/external_inputs.rs"
+
+[[example]]
+name = "mova"
+path = "../examples/mova.rs"
