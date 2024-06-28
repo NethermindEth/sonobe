@@ -1,19 +1,17 @@
-use std::time::Instant;
-use ark_ff::{ PrimeField};
-use folding_schemes::ccs::r1cs::R1CS;
-use folding_schemes::commitment::CommitmentScheme;
-use folding_schemes::folding::nova::{ Witness};
-use folding_schemes::folding::nova::nifs::NIFS;
-use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
-use folding_schemes::commitment::pedersen::{ Pedersen};
-use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
+use ark_ff::PrimeField;
 use ark_pallas::{Fr, Projective};
 use ark_std::UniformRand;
+use folding_schemes::ccs::r1cs::R1CS;
+use folding_schemes::commitment::pedersen::Pedersen;
+use folding_schemes::commitment::CommitmentScheme;
+use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
-use std::mem;
+use folding_schemes::folding::nova::Witness;
+use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use std::mem::size_of_val;
+use std::time::Instant;
 
-fn main(){
+fn main() {
     println!("starting");
     let r1cs = get_test_r1cs();
     let z = get_test_z(3);
@@ -23,11 +21,11 @@ fn main(){
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, r1cs.A.n_cols).unwrap();
 
     let mut running_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
-    let mut running_committed_instance = running_instance_w
+    let running_committed_instance = running_instance_w
         .commit::<Pedersen<Projective>>(&pedersen_params, x)
         .unwrap();
 
-    let incoming_instance_z = get_test_z( 4);
+    let incoming_instance_z = get_test_z(4);
     let (w, x) = r1cs.split_z(&incoming_instance_z);
     let incoming_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
     let incoming_committed_instance = incoming_instance_w
@@ -46,7 +44,7 @@ fn main(){
         &incoming_instance_w,
         &incoming_committed_instance,
     )
-        .unwrap();
+    .unwrap();
     let result = NIFS::<Projective, Pedersen<Projective>>::fold_instances(
         r,
         &running_instance_w,
@@ -55,12 +53,11 @@ fn main(){
         &incoming_committed_instance,
         &T,
         cmT,
-    ).unwrap();
+    )
+    .unwrap();
 
     println!("Nova prove time {:?}", start.elapsed());
     println!("Nova bytes used {:?}", size_of_val(&result));
-
-
 
     let (folded_w, _) = result;
 
@@ -122,5 +119,3 @@ pub fn to_F_dense_matrix<F: PrimeField>(M: Vec<Vec<usize>>) -> Vec<Vec<F>> {
 pub fn to_F_vec<F: PrimeField>(z: Vec<usize>) -> Vec<F> {
     z.iter().map(|c| F::from(*c as u64)).collect()
 }
-
-

@@ -2,7 +2,7 @@
 
 # Benchmarks 
 
-To run the benchmars use 
+To run the benchmarks use 
 
 `cargo run --release --example <folding>`
 
