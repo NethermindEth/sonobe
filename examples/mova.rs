@@ -11,12 +11,14 @@ use ark_std::UniformRand;
 use std::mem::size_of_val;
 use folding_schemes::transcript::Transcript;
 use ark_std::{log2};
+use rand::Rng;
 use folding_schemes::ccs::r1cs::R1CS;
 
 fn main() {
     println!("starting");
 
     // define r1cs and parameters
+    let random_num: usize = rand::thread_rng().gen_range(1..=2642245);
     let r1cs = get_test_r1cs();
     let mut rng = ark_std::test_rng();
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, r1cs.A.n_cols).unwrap();
@@ -24,7 +26,7 @@ fn main() {
     let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
 
     // INSTANCE 1
-    let z_1 = get_test_z(3);
+    let z_1 = get_test_z(random_num);
     let (w_1, x_1) = r1cs.split_z(&z_1);
     let witness_1 = Witness::<Projective>::new(w_1.clone(), r1cs.A.n_rows);
 
@@ -53,6 +55,7 @@ fn main() {
     // NIFS.P
     let result = NIFS::<Projective, Pedersen<Projective>,PoseidonTranscript<Projective>>::prove(&pedersen_params, &r1cs, &mut transcript_p, &committed_instance_1, &committed_instance_2, &witness_1, &witness_2);
 
+    println!("Z number: {:?}", random_num);
     println!("Mova prove time {:?}", start.elapsed());
     println!("Mova bytes used {:?}", size_of_val(&result));
 
