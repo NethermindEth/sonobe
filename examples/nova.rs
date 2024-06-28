@@ -1,22 +1,17 @@
 use std::time::Instant;
-use ark_crypto_primitives::sponge::Absorb;
-use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
-use ark_ec::CurveGroup;
-use ark_ff::{BigInteger, PrimeField};
+use ark_ff::{ PrimeField};
 use folding_schemes::ccs::r1cs::R1CS;
 use folding_schemes::commitment::CommitmentScheme;
-use folding_schemes::folding::nova::{CommittedInstance, Witness};
-use folding_schemes::folding::nova::circuits::ChallengeGadget;
+use folding_schemes::folding::nova::{ Witness};
 use folding_schemes::folding::nova::nifs::NIFS;
-use folding_schemes::transcript::poseidon::poseidon_canonical_config;
-use folding_schemes::commitment::pedersen::{Params as PedersenParams, Pedersen};
+use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
+use folding_schemes::commitment::pedersen::{ Pedersen};
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use ark_pallas::{Fr, Projective};
 use ark_std::UniformRand;
 use folding_schemes::folding::nova::traits::NovaR1CS;
 use std::mem;
 use std::mem::size_of_val;
-
 
 fn main(){
     println!("starting");
@@ -61,8 +56,11 @@ fn main(){
         &T,
         cmT,
     ).unwrap();
+
     println!("Nova prove time {:?}", start.elapsed());
     println!("Nova bytes used {:?}", size_of_val(&result));
+
+
 
     let (folded_w, _) = result;
 
@@ -74,84 +72,6 @@ fn main(){
     );
     r1cs.check_relaxed_instance_relation(&folded_w, &folded_committed_instance)
         .unwrap();
-}
-
-
-#[allow(clippy::type_complexity)]
-pub(crate) fn prepare_simple_fold_inputs<C>() -> (
-    PedersenParams<C>,
-    PoseidonConfig<C::ScalarField>,
-    R1CS<C::ScalarField>,
-    Witness<C>,           // w1
-    CommittedInstance<C>, // ci1
-    Witness<C>,           // w2
-    CommittedInstance<C>, // ci2
-    Witness<C>,           // w3
-    CommittedInstance<C>, // ci3
-    Vec<C::ScalarField>,  // T
-    C,                    // cmT
-    Vec<bool>,            // r_bits
-    C::ScalarField,       // r_Fr
-)
-    where
-        C: CurveGroup,
-        <C as CurveGroup>::BaseField: PrimeField,
-        C::ScalarField: Absorb,
-{
-    let r1cs = get_test_r1cs();
-    let z1 = get_test_z(3);
-    let z2 = get_test_z(4);
-    let (w1, x1) = r1cs.split_z(&z1);
-    let (w2, x2) = r1cs.split_z(&z2);
-
-    let w1 = Witness::<C>::new(w1.clone(), r1cs.A.n_rows);
-    let w2 = Witness::<C>::new(w2.clone(), r1cs.A.n_rows);
-
-    let mut rng = ark_std::test_rng();
-    let (pedersen_params, _) = Pedersen::<C>::setup(&mut rng, r1cs.A.n_cols).unwrap();
-
-    // compute committed instances
-    let ci1 = w1
-        .commit::<Pedersen<C>>(&pedersen_params, x1.clone())
-        .unwrap();
-    let ci2 = w2
-        .commit::<Pedersen<C>>(&pedersen_params, x2.clone())
-        .unwrap();
-
-    // NIFS.P
-    let (T, cmT) =
-        NIFS::<C, Pedersen<C>>::compute_cmT(&pedersen_params, &r1cs, &w1, &ci1, &w2, &ci2)
-            .unwrap();
-
-    let poseidon_config = poseidon_canonical_config::<C::ScalarField>();
-
-    let r_bits = ChallengeGadget::<C>::get_challenge_native(
-        &poseidon_config,
-        ci1.clone(),
-        ci2.clone(),
-        cmT,
-    )
-        .unwrap();
-    let r_Fr = C::ScalarField::from_bigint(BigInteger::from_bits_le(&r_bits)).unwrap();
-
-    let (w3, ci3) =
-        NIFS::<C, Pedersen<C>>::fold_instances(r_Fr, &w1, &ci1, &w2, &ci2, &T, cmT).unwrap();
-
-    (
-        pedersen_params,
-        poseidon_config,
-        r1cs,
-        w1,
-        ci1,
-        w2,
-        ci2,
-        w3,
-        ci3,
-        T,
-        cmT,
-        r_bits,
-        r_Fr,
-    )
 }
 
 pub fn get_test_r1cs<F: PrimeField>() -> R1CS<F> {
