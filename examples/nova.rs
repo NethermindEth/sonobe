@@ -10,11 +10,14 @@ use folding_schemes::folding::nova::Witness;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use std::mem::size_of_val;
 use std::time::Instant;
+use rand::Rng;
+
 
 fn main() {
     println!("starting");
+    let random_num: usize = rand::thread_rng().gen_range(1..=2642245);
     let r1cs = get_test_r1cs();
-    let z = get_test_z(3);
+    let z = get_test_z(random_num);
     let (w, x) = r1cs.split_z(&z);
 
     let mut rng = ark_std::test_rng();
@@ -56,6 +59,7 @@ fn main() {
     )
     .unwrap();
 
+    println!("Z number: {:?}", random_num);
     println!("Nova prove time {:?}", start.elapsed());
     println!("Nova bytes used {:?}", size_of_val(&result));
 
