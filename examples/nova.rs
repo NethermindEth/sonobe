@@ -8,10 +8,9 @@ use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
 use folding_schemes::folding::nova::Witness;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
+use rand::Rng;
 use std::mem::size_of_val;
 use std::time::Instant;
-use rand::Rng;
-
 
 fn main() {
     println!("starting");

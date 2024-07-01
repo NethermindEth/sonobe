@@ -2,13 +2,11 @@ use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
 use ark_ff::PrimeField;
 
-
 use ark_poly::MultilinearExtension;
 use ark_std::{log2, Zero};
 use std::marker::PhantomData;
 
 use super::homogenization::Homogenization;
-
 
 use super::{CommittedInstance, Witness};
 use crate::ccs::r1cs::R1CS;
@@ -243,7 +241,14 @@ where
         ci2: &CommittedInstance<C>,
         proof: &Proof<C, T, H>,
     ) -> Result<CommittedInstance<C>, Error> {
-        let rE_prime = H::verify(transcript, ci1, ci2, &proof.hg_proof, &proof.mleE1_prime, &proof.mleE2_prime)?;
+        let rE_prime = H::verify(
+            transcript,
+            ci1,
+            ci2,
+            &proof.hg_proof,
+            &proof.mleE1_prime,
+            &proof.mleE2_prime,
+        )?;
 
         transcript.absorb(&proof.mleE1_prime);
         transcript.absorb(&proof.mleE2_prime);
