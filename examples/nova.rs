@@ -23,7 +23,7 @@ fn main() {
     let mut rng = ark_std::test_rng();
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, r1cs.A.n_cols).unwrap();
 
-    let mut running_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
+    let running_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
     let running_committed_instance = running_instance_w
         .commit::<Pedersen<Projective>>(&pedersen_params, x)
         .unwrap();
