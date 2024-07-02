@@ -1,31 +1,28 @@
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
 use ark_ff::PrimeField;
-use ark_poly::univariate::DensePolynomial;
-use ark_poly::DenseUVPolynomial;
+
 use ark_poly::MultilinearExtension;
-use ark_poly::Polynomial;
 use ark_std::{log2, Zero};
 use std::marker::PhantomData;
 
-use super::utils::compute_c;
-use super::utils::compute_g;
+use super::homogenization::Homogenization;
+
 use super::{CommittedInstance, Witness};
 use crate::ccs::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
 use crate::transcript::Transcript;
 
 use crate::utils::mle::dense_vec_to_dense_mle;
-use crate::utils::sum_check::structs::IOPProof as SumCheckProof;
-use crate::utils::sum_check::{IOPSumCheck, SumCheck};
+
 use crate::utils::vec::{hadamard, mat_vec_mul, vec_add, vec_scalar_mul, vec_sub};
-use crate::utils::virtual_polynomial::VPAuxInfo;
+
 use crate::Error;
 
 /// Proof defines a multifolding proof
 #[derive(Clone, Debug)]
-pub struct Proof<C: CurveGroup> {
-    pub sc_proof: SumCheckProof<C::ScalarField>,
+pub struct Proof<C: CurveGroup, T: Transcript<C>, H: Homogenization<C, T>> {
+    pub hg_proof: H::Proof,
     pub mleE1_prime: C::ScalarField,
     pub mleE2_prime: C::ScalarField,
     pub mleT: C::ScalarField,
@@ -33,13 +30,15 @@ pub struct Proof<C: CurveGroup> {
 
 /// Implements the Non-Interactive Folding Scheme described in section 4 of
 /// [Nova](https://eprint.iacr.org/2021/370.pdf)
-pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C>> {
+pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C>, H: Homogenization<C, T>> {
     _c: PhantomData<C>,
     _cp: PhantomData<CS>,
     _ct: PhantomData<T>,
+    _ch: PhantomData<H>,
 }
 
-impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C>> NIFS<C, CS, T>
+impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C>, H: Homogenization<C, T>>
+    NIFS<C, CS, T, H>
 where
     <C as Group>::ScalarField: Absorb,
 {
@@ -186,17 +185,12 @@ where
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<(Proof<C>, CommittedInstance<C>, Witness<C>), Error> {
-        let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
-        transcript.absorb(&beta_scalar);
-        let beta: C::ScalarField = transcript.get_challenge();
+    ) -> Result<(Proof<C, T, H>, CommittedInstance<C>, Witness<C>), Error> {
+        let (hg_proof, mleE1_prime, mleE2_prime, rE_prime) =
+            H::prove(transcript, ci1, ci2, w1, w2)?;
 
-        let g = compute_g(ci1, ci2, w1, w2, &beta)?;
-
-        let sumcheck_proof = IOPSumCheck::<C, T>::prove(&g, transcript)
-            .map_err(|err| Error::SumCheckProveError(err.to_string()))?;
-
-        let rE_prime = sumcheck_proof.point.clone();
+        transcript.absorb(&mleE1_prime);
+        transcript.absorb(&mleE2_prime);
 
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
@@ -209,22 +203,19 @@ where
             return Err(Error::NotEqual);
         }
 
-        let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
-        let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);
         let mleT = dense_vec_to_dense_mle(vars, &T);
+        let mleT_evaluated = mleT.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
+
+        transcript.absorb(&mleT_evaluated);
 
         let rho_scalar = C::ScalarField::from_le_bytes_mod_order(b"rho");
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
         let _r2 = rho * rho;
 
-        let mleE1_prime = mleE1.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
-        let mleE2_prime = mleE2.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
-        let mleT_evaluated = mleT.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
-
         Ok((
             Proof {
-                sc_proof: sumcheck_proof,
+                hg_proof,
                 mleE1_prime,
                 mleE2_prime,
                 mleT: mleT_evaluated,
@@ -248,64 +239,26 @@ where
         transcript: &mut impl Transcript<C>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
-        proof: &Proof<C>,
+        proof: &Proof<C, T, H>,
     ) -> Result<CommittedInstance<C>, Error> {
-        let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
-        transcript.absorb(&beta_scalar);
-        let beta: C::ScalarField = transcript.get_challenge();
-
-        let vp_aux_info = VPAuxInfo::<C::ScalarField> {
-            max_degree: 1,
-            num_variables: ci1.rE.len(),
-            phantom: PhantomData::<C::ScalarField>,
-        };
-
-        // Step 3: Start verifying the sumcheck
-        // First, compute the expected sumcheck sum: \sum gamma^j v_j
-        let mut sum_evaluation_claims = ci1.mleE;
-
-        sum_evaluation_claims += beta * ci2.mleE;
-
-        // Verify the interactive part of the sumcheck
-        let sumcheck_subclaim = IOPSumCheck::<C, T>::verify(
-            sum_evaluation_claims,
-            &proof.sc_proof,
-            &vp_aux_info,
+        let rE_prime = H::verify(
             transcript,
-        )
-        .map_err(|err| Error::SumCheckVerifyError(err.to_string()))?;
-
-        let rE_prime = sumcheck_subclaim.point.clone();
-
-        let g = compute_c(
-            proof.mleE1_prime,
-            proof.mleE2_prime,
-            beta,
-            &ci1.rE,
-            &ci2.rE,
-            &rE_prime,
+            ci1,
+            ci2,
+            &proof.hg_proof,
+            &proof.mleE1_prime,
+            &proof.mleE2_prime,
         )?;
 
-        if g != sumcheck_subclaim.expected_evaluation {
-            return Err(Error::NotEqual);
-        }
-
-        let g_on_rxprime_from_sumcheck_last_eval = DensePolynomial::from_coefficients_slice(
-            &proof.sc_proof.proofs.last().ok_or(Error::Empty)?.coeffs,
-        )
-        .evaluate(rE_prime.last().ok_or(Error::Empty)?);
-        if g_on_rxprime_from_sumcheck_last_eval != g {
-            return Err(Error::NotEqual);
-        }
-        if g_on_rxprime_from_sumcheck_last_eval != sumcheck_subclaim.expected_evaluation {
-            return Err(Error::NotEqual);
-        }
+        transcript.absorb(&proof.mleE1_prime);
+        transcript.absorb(&proof.mleE2_prime);
+        transcript.absorb(&proof.mleT);
 
         let rho_scalar = C::ScalarField::from_le_bytes_mod_order(b"rho");
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
 
-        NIFS::<C, CS, T>::fold_homogenized_committed_instance(
+        NIFS::<C, CS, T, H>::fold_homogenized_committed_instance(
             rho,
             ci1,
             ci2,
