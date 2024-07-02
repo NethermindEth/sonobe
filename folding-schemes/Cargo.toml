@@ -26,6 +26,7 @@ ark-groth16 = { version = "^0.4.0" }
 
 # tmp imports for espresso's sumcheck
 espresso_subroutines = {git="https://github.com/EspressoSystems/hyperplonk", package="subroutines"}
+num-traits = "0.2.15"
 
 [dev-dependencies]
 ark-pallas = {version="0.4.0", features=["r1cs"]}

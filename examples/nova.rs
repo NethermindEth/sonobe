@@ -7,6 +7,8 @@ use folding_schemes::commitment::CommitmentScheme;
 use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
 use folding_schemes::folding::nova::Witness;
+use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
+use folding_schemes::transcript::Transcript;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use rand::Rng;
 use std::mem::size_of_val;
@@ -14,9 +16,8 @@ use std::time::Instant;
 
 fn main() {
     println!("starting");
-    let random_num: usize = rand::thread_rng().gen_range(1..=2642245);
     let r1cs = get_test_r1cs();
-    let z = get_test_z(random_num);
+    let z = get_test_z(3);
     let (w, x) = r1cs.split_z(&z);
 
     let mut rng = ark_std::test_rng();
@@ -34,8 +35,8 @@ fn main() {
         .commit::<Pedersen<Projective>>(&pedersen_params, x)
         .unwrap();
 
-    let r = Fr::rand(&mut rng); // folding challenge would come from the RO
-
+    let poseidon_config = poseidon_canonical_config::<ark_pallas::Fr>();
+    let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
     let start = Instant::now();
     // NIFS.P
     let (T, cmT) = NIFS::<Projective, Pedersen<Projective>>::compute_cmT(
@@ -47,6 +48,17 @@ fn main() {
         &incoming_committed_instance,
     )
     .unwrap();
+
+    match transcript_p.absorb_point(&cmT) {
+        Ok(_) => {
+            //
+        }
+        Err(e) => {
+            println!("Absorbed failed: {:?}", e);
+        }
+    }
+
+    let r = transcript_p.get_challenge();
     let result = NIFS::<Projective, Pedersen<Projective>>::fold_instances(
         r,
         &running_instance_w,
@@ -70,8 +82,11 @@ fn main() {
         &incoming_committed_instance,
         &cmT,
     );
-    r1cs.check_relaxed_instance_relation(&folded_w, &folded_committed_instance)
-        .unwrap();
+    let check = r1cs.check_relaxed_instance_relation(&folded_w, &folded_committed_instance);
+    match check {
+        Ok(_) => println!("The relation check was successful."),
+        Err(e) => println!("The relation check failed: {:?}", e),
+    }
 }
 
 pub fn get_test_r1cs<F: PrimeField>() -> R1CS<F> {
