@@ -134,7 +134,7 @@ where
         let beta: C::ScalarField = transcript.get_challenge();
 
         let vp_aux_info = VPAuxInfo::<C::ScalarField> {
-            max_degree: 1,
+            max_degree: 2,
             num_variables: ci1.rE.len(),
             phantom: PhantomData::<C::ScalarField>,
         };
