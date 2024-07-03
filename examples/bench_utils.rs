@@ -1,3 +1,10 @@
+use ark_ff::{PrimeField, BigInteger};
+use num_bigint::BigUint;
+use num_traits::One;
+use folding_schemes::ccs::r1cs::R1CS;
+use folding_schemes::Error;
+use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
+
 // would be best to move this to other file
 pub fn get_test_r1cs<F: PrimeField>() -> R1CS<F> {
     // R1CS for: x^3 + x + 5 = y (example from article
@@ -50,6 +57,7 @@ pub fn to_F_vec<F: PrimeField>(z: Vec<BigUint>) -> Vec<F> {
     let mut result = Vec::with_capacity(z.len()); // Pre-allocate space for efficiency
     for bigint in z {
         // Convert each BigUint to F::BigInt
+        // match F::try_from(bigint) {
         match num_bigint_to_ark_bigint::<F>(&bigint) {
             Ok(f_bigint) => {
                 // Attempt to convert F::BigInt to the prime field element
@@ -60,6 +68,7 @@ pub fn to_F_vec<F: PrimeField>(z: Vec<BigUint>) -> Vec<F> {
                     eprintln!("Conversion to field element failed for bigint: {:?}", f_bigint);
                     continue; // Optionally skip or handle differently
                 }
+                // result.push(f_bigint);
             },
             Err(e) => {
                 // Handle errors from bigint conversion
@@ -76,3 +85,7 @@ pub fn num_bigint_to_ark_bigint<F: PrimeField>(value: &BigUint) -> Result<F::Big
         Error::BigIntConversionError("Failed to convert to PrimeField::BigInt".to_string())
     })
 }
+
+// pub const BIG_NUM: BigUint = BigUint::one() << 80;
+// pub const FOUR: BigUint = BigUint::one() + BigUint::one() + BigUint::one() + BigUint::one();
+

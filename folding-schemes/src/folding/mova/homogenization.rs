@@ -134,7 +134,7 @@ where
         let beta: C::ScalarField = transcript.get_challenge();
 
         let vp_aux_info = VPAuxInfo::<C::ScalarField> {
-            max_degree: 1,
+            max_degree: 2,
             num_variables: ci1.rE.len(),
             phantom: PhantomData::<C::ScalarField>,
         };
@@ -202,6 +202,7 @@ where
         Error,
     > {
         let vars = log2(w1.E.len()) as usize;
+
 
         let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
         let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);

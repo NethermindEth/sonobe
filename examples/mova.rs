@@ -13,17 +13,25 @@ use folding_schemes::folding::mova::Witness;
 use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
 use folding_schemes::transcript::Transcript;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
-use num_bigint::{BigUint, RandBigInt};
+use num_bigint::{BigInt, BigUint, RandBigInt};
 use rand::Rng;
 use std::mem::size_of_val;
 use std::time::Instant;
 
 use folding_schemes::Error;
 use num_traits::{One, Zero};
+use tracing::log::__private_api::log;
 use folding_schemes::folding::mova::traits::MovaR1CS;
+use crate::bench_utils::{get_test_r1cs, get_test_z, num_bigint_to_ark_bigint};
+use ark_ff::{ BigInteger};
+
+
+mod bench_utils;
 
 fn main() {
     println!("starting");
+
+
 
     // define r1cs and parameters
     let r1cs: R1CS<Fr> = get_test_r1cs();
@@ -35,9 +43,25 @@ fn main() {
     // let big_number: BigUint = One::one() ; // This creates a 250-bit number.
 
     // // INSTANCE 1
-    let z_1: Vec<Fr> = get_test_z(3);
+    let big_num: BigUint = BigUint::one() << 80;
+
+    // let one = BigUint::one();
+    // let temp = Fr::try_from(big_num.clone()).unwrap();
+    // let temp2 = Fr::from_bigint(BigInt::from(temp));
+    // let temp = num_bigint_to_ark_bigint::<Fr>(&big_num).unwrap();
+    // let temp3 = Fr::from_bigint(temp.clone());
+    // let temp2 = Fr::try_from(big_num.clone()).unwrap();
+    // println!("{:?}", temp);
+    // println!("{:?}", temp2);
+    // println!("{:?}", temp3);
+    //
+    println!("{:?}", big_num);
+
+    let z_1: Vec<Fr> = get_test_z(big_num);
+    // println!("{:?}", z_1);
+
     let (w_1, x_1) = r1cs.split_z(&z_1);
-    let witness_1 = Witness::<Projective>::new(w_1.clone(), r1cs.A.n_rows);
+    let mut witness_1 = Witness::<Projective>::new(w_1.clone(), r1cs.A.n_rows);
 
     // generate a random evaluation point for MLE
     let size_rE_1 = log2(witness_1.E.len());
@@ -48,7 +72,9 @@ fn main() {
         .unwrap();
 
     // INSTANCE 2
-    let z_2 = get_test_z(4);
+    let four = BigUint::one() + BigUint::one() + BigUint::one() + BigUint::one();
+
+    let z_2 = get_test_z(four);
     let (w_2, x_2) = r1cs.split_z(&z_2);
     let witness_2 = Witness::<Projective>::new(w_2.clone(), r1cs.A.n_rows);
 
@@ -65,7 +91,7 @@ fn main() {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>,
+        SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>,
     >::prove(
         &pedersen_params,
         &r1cs,
@@ -76,7 +102,8 @@ fn main() {
         &witness_2,
     ).unwrap();
 
-    println!("Mova prove time {:?}", start.elapsed());
+
+    println!("Mova prove time (point-vs-line variant) {:?}", start.elapsed());
     println!("Mova bytes used {:?}", size_of_val(&result));
 
     //NIFS.V
@@ -88,7 +115,7 @@ fn main() {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>,
+        SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>,
     >::verify(&mut transcript_p, &committed_instance_1, &committed_instance_2, &proof).unwrap();
     let check = r1cs.check_relaxed_instance_relation(&folded_w, &folded_committed_instance);
     match check {
@@ -97,53 +124,54 @@ fn main() {
     }
 
 
+
 }
 
-pub fn get_test_r1cs<F: PrimeField>() -> R1CS<F> {
-    // R1CS for: x^3 + x + 5 = y (example from article
-    // https://www.vitalik.ca/general/2016/12/10/qap.html )
-    let A = to_F_matrix::<F>(vec![
-        vec![0, 1, 0, 0, 0, 0],
-        vec![0, 0, 0, 1, 0, 0],
-        vec![0, 1, 0, 0, 1, 0],
-        vec![5, 0, 0, 0, 0, 1],
-    ]);
-    let B = to_F_matrix::<F>(vec![
-        vec![0, 1, 0, 0, 0, 0],
-        vec![0, 1, 0, 0, 0, 0],
-        vec![1, 0, 0, 0, 0, 0],
-        vec![1, 0, 0, 0, 0, 0],
-    ]);
-    let C = to_F_matrix::<F>(vec![
-        vec![0, 0, 0, 1, 0, 0],
-        vec![0, 0, 0, 0, 1, 0],
-        vec![0, 0, 0, 0, 0, 1],
-        vec![0, 0, 1, 0, 0, 0],
-    ]);
-
-    R1CS::<F> { l: 1, A, B, C }
-}
-
-pub fn get_test_z<F: PrimeField>(input: usize) -> Vec<F> {
-    // z = (1, io, w)
-    to_F_vec(vec![
-        1,
-        input,                             // io
-        input * input * input + input + 5, // x^3 + x + 5
-        input * input,                     // x^2
-        input * input * input,             // x^2 * x
-        input * input * input + input,     // x^3 + x
-    ])
-}
-
-pub fn to_F_matrix<F: PrimeField>(M: Vec<Vec<usize>>) -> SparseMatrix<F> {
-    dense_matrix_to_sparse(to_F_dense_matrix(M))
-}
-pub fn to_F_dense_matrix<F: PrimeField>(M: Vec<Vec<usize>>) -> Vec<Vec<F>> {
-    M.iter()
-        .map(|m| m.iter().map(|r| F::from(*r as u64)).collect())
-        .collect()
-}
-pub fn to_F_vec<F: PrimeField>(z: Vec<usize>) -> Vec<F> {
-    z.iter().map(|c| F::from(*c as u64)).collect()
-}
+// pub fn get_test_r1cs<F: PrimeField>() -> R1CS<F> {
+//     // R1CS for: x^3 + x + 5 = y (example from article
+//     // https://www.vitalik.ca/general/2016/12/10/qap.html )
+//     let A = to_F_matrix::<F>(vec![
+//         vec![0, 1, 0, 0, 0, 0],
+//         vec![0, 0, 0, 1, 0, 0],
+//         vec![0, 1, 0, 0, 1, 0],
+//         vec![5, 0, 0, 0, 0, 1],
+//     ]);
+//     let B = to_F_matrix::<F>(vec![
+//         vec![0, 1, 0, 0, 0, 0],
+//         vec![0, 1, 0, 0, 0, 0],
+//         vec![1, 0, 0, 0, 0, 0],
+//         vec![1, 0, 0, 0, 0, 0],
+//     ]);
+//     let C = to_F_matrix::<F>(vec![
+//         vec![0, 0, 0, 1, 0, 0],
+//         vec![0, 0, 0, 0, 1, 0],
+//         vec![0, 0, 0, 0, 0, 1],
+//         vec![0, 0, 1, 0, 0, 0],
+//     ]);
+//
+//     R1CS::<F> { l: 1, A, B, C }
+// }
+//
+// pub fn get_test_z<F: PrimeField>(input: usize) -> Vec<F> {
+//     // z = (1, io, w)
+//     to_F_vec(vec![
+//         1,
+//         input,                             // io
+//         input * input * input + input + 5, // x^3 + x + 5
+//         input * input,                     // x^2
+//         input * input * input,             // x^2 * x
+//         input * input * input + input,     // x^3 + x
+//     ])
+// }
+//
+// pub fn to_F_matrix<F: PrimeField>(M: Vec<Vec<usize>>) -> SparseMatrix<F> {
+//     dense_matrix_to_sparse(to_F_dense_matrix(M))
+// }
+// pub fn to_F_dense_matrix<F: PrimeField>(M: Vec<Vec<usize>>) -> Vec<Vec<F>> {
+//     M.iter()
+//         .map(|m| m.iter().map(|r| F::from(*r as u64)).collect())
+//         .collect()
+// }
+// pub fn to_F_vec<F: PrimeField>(z: Vec<usize>) -> Vec<F> {
+//     z.iter().map(|c| F::from(*c as u64)).collect()
+// }
