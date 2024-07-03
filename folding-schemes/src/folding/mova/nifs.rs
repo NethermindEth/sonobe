@@ -5,6 +5,7 @@ use ark_ff::PrimeField;
 use ark_poly::MultilinearExtension;
 use ark_std::{log2, Zero};
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use super::homogenization::Homogenization;
 
@@ -53,6 +54,19 @@ where
         let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
 
         // this is parallelizable (for the future)
+        // let mut Az1 = Vec::with_capacity(z1.len());
+        // Az1 = z1.iter()
+        //     .map(|&elem| elem * C::ScalarField::from(2u64))
+        //     .collect();
+        // let mut Bz1 = Vec::with_capacity(z1.len());
+        // Bz1 = z1.iter()
+        //     .map(|&elem| elem * C::ScalarField::from(2u64))
+        //     .collect();
+        // let mut Cz1 = Vec::with_capacity(z1.len());
+        //
+        // Cz1 = z1.iter()
+        //     .map(|&elem| elem * C::ScalarField::from(2u64))
+        //     .collect();
         let Az1 = mat_vec_mul(&A, z1)?;
         let Bz1 = mat_vec_mul(&B, z1)?;
         let Cz1 = mat_vec_mul(&C, z1)?;
@@ -186,16 +200,22 @@ where
         w1: &Witness<C>,
         w2: &Witness<C>,
     ) -> Result<(Proof<C, T, H>, CommittedInstance<C>, Witness<C>), Error> {
+        println!("Point 0: nifs.Prove ");
+        let start = Instant::now();
         let (hg_proof, mleE1_prime, mleE2_prime, rE_prime) =
             H::prove(transcript, ci1, ci2, w1, w2)?;
+        println!("Point 1: nifs.Prove {:?} ", start.elapsed());
 
         transcript.absorb(&mleE1_prime);
         transcript.absorb(&mleE2_prime);
 
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
+        println!("Point 2 nifs.Prove {:?} ", start.elapsed());
 
         let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
+        println!("Point 3 nifs.Prove {:?} ", start.elapsed());
+
 
         let vars = log2(w1.E.len()) as usize;
 
@@ -206,12 +226,16 @@ where
         let mleT = dense_vec_to_dense_mle(vars, &T);
         let mleT_evaluated = mleT.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
 
+        println!("Point 4 nifs.Prove {:?} ", start.elapsed());
+
         transcript.absorb(&mleT_evaluated);
 
         let rho_scalar = C::ScalarField::from_le_bytes_mod_order(b"rho");
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
         let _r2 = rho * rho;
+
+        println!("Point 5 nifs.Prove {:?} ", start.elapsed());
 
         Ok((
             Proof {

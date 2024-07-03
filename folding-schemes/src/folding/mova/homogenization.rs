@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
@@ -96,16 +97,27 @@ where
         ),
         Error,
     > {
+        println!("Point 0: sumcheck ");
+        let start = Instant::now();
+
+
         let vars = log2(w1.E.len()) as usize;
 
         let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
         transcript.absorb(&beta_scalar);
         let beta: C::ScalarField = transcript.get_challenge();
 
+        println!("Point 1: sumcheck {:?} ", start.elapsed());
+
+
         let g = compute_g(ci1, ci2, w1, w2, &beta)?;
+        println!("Point 2: sumcheck {:?} ", start.elapsed());
+
 
         let sumcheck_proof = IOPSumCheck::<C, T>::prove(&g, transcript)
             .map_err(|err| Error::SumCheckProveError(err.to_string()))?;
+
+        println!("Point 3: sumcheck {:?} ", start.elapsed());
 
         let rE_prime = sumcheck_proof.point.clone();
 
@@ -114,6 +126,9 @@ where
 
         let mleE1_prime = mleE1.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
         let mleE2_prime = mleE2.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
+
+        println!("Point 4: sumcheck {:?} ", start.elapsed());
+
 
         Ok((sumcheck_proof, mleE1_prime, mleE2_prime, rE_prime))
     }
@@ -203,12 +218,17 @@ where
     > {
         let vars = log2(w1.E.len()) as usize;
 
-
         let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
         let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);
+        println!("Point 0: point-vs-line ");
+        let start = Instant::now();
+
+
 
         let h1 = compute_h(&mleE1, &ci1.rE, &ci2.rE)?;
         let h2 = compute_h(&mleE2, &ci1.rE, &ci2.rE)?;
+        println!("Point 1: point-vs-line {:?} ", start.elapsed());
+
 
         transcript.absorb_vec(h1.coeffs());
         transcript.absorb_vec(h2.coeffs());
@@ -217,10 +237,16 @@ where
         transcript.absorb(&beta_scalar);
         let beta = transcript.get_challenge();
 
+        println!("Point 2: point-vs-line {:?} ", start.elapsed());
+
+
         let mleE1_prime = h1.evaluate(&beta);
         let mleE2_prime = h2.evaluate(&beta);
 
+        println!("Point 3: point-vs-line {:?} ", start.elapsed());
+
         let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
+        println!("Point 4: point-vs-line {:?} ", start.elapsed());
 
         Ok((Self::Proof { h1, h2 }, mleE1_prime, mleE2_prime, rE_prime))
     }
