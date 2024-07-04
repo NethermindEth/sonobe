@@ -8,10 +8,9 @@ use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
 use folding_schemes::folding::nova::Witness;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
+use rand::Rng;
 use std::mem::size_of_val;
 use std::time::Instant;
-use rand::Rng;
-
 
 fn main() {
     println!("starting");
@@ -23,7 +22,7 @@ fn main() {
     let mut rng = ark_std::test_rng();
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, r1cs.A.n_cols).unwrap();
 
-    let mut running_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
+    let running_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
     let running_committed_instance = running_instance_w
         .commit::<Pedersen<Projective>>(&pedersen_params, x)
         .unwrap();
