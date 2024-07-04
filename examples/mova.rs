@@ -5,19 +5,17 @@ use ark_std::UniformRand;
 use folding_schemes::ccs::r1cs::R1CS;
 use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::CommitmentScheme;
-use folding_schemes::folding::mova::homogenization::{
-    SumCheckHomogenization,
-};
+use folding_schemes::folding::mova::homogenization::{PointVsLineHomogenization, SumCheckHomogenization};
 use folding_schemes::folding::mova::nifs::NIFS;
 use folding_schemes::folding::mova::Witness;
 use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
 use folding_schemes::transcript::Transcript;
-use num_bigint::{BigInt, BigUint, RandBigInt};
+use num_bigint::{ BigUint, RandBigInt};
 use rand::Rng;
 use std::mem::size_of_val;
 use std::time::Instant;
 
-use crate::bench_utils::{get_test_r1cs, get_test_z};
+use crate::bench_utils::{get_test_r1cs, get_test_z_albert};
 use ark_ff::BigInteger;
 use folding_schemes::folding::mova::traits::MovaR1CS;
 use num_traits::{One, Zero};
@@ -26,6 +24,7 @@ mod bench_utils;
 
 fn main() {
     println!("starting");
+
 
     // define r1cs and parameters
     let r1cs: R1CS<Fr> = get_test_r1cs();
@@ -41,7 +40,7 @@ fn main() {
 
     println!("Big_Num {:?}", big_num);
 
-    let z_2: Vec<Fr> = get_test_z(big_num.clone());
+    let z_2: Vec<Fr> = get_test_z_albert(big_num.clone());
 
     // println!("Z Instance {:?}", z_2);
 
@@ -60,7 +59,7 @@ fn main() {
     // INSTANCE 2
     let four = BigUint::one() + BigUint::one() + BigUint::one() + BigUint::one();
 
-    let z_2 = get_test_z(four);
+    let z_2 = get_test_z_albert(four);
     let (w_2, x_2) = r1cs.split_z(&z_2);
     let witness_2 = Witness::<Projective>::new(w_2.clone(), r1cs.A.n_rows);
 
@@ -77,7 +76,7 @@ fn main() {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>,
+        SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>
     >::prove(
         &pedersen_params,
         &r1cs,
@@ -90,7 +89,7 @@ fn main() {
     .unwrap();
 
     println!(
-        "Mova prove time (sumcheck variant) {:?}",
+        "Mova prove time (point-vs-line variant) {:?}",
         start.elapsed()
     );
     println!("Mova bytes used {:?}", size_of_val(&result));

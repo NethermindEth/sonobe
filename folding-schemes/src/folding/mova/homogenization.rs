@@ -97,7 +97,7 @@ where
         ),
         Error,
     > {
-        println!("Point 0: sumcheck ");
+        println!("Mova Point 0: sumcheck - Starting ");
         let start = Instant::now();
 
 
@@ -107,17 +107,17 @@ where
         transcript.absorb(&beta_scalar);
         let beta: C::ScalarField = transcript.get_challenge();
 
-        println!("Point 1: sumcheck {:?} ", start.elapsed());
+        println!("Mova Point 1: sumcheck {:?} - Challenge creation", start.elapsed());
 
 
         let g = compute_g(ci1, ci2, w1, w2, &beta)?;
-        println!("Point 2: sumcheck {:?} ", start.elapsed());
+        println!("Mova Point 2: sumcheck {:?} - Computing g", start.elapsed());
 
 
         let sumcheck_proof = IOPSumCheck::<C, T>::prove(&g, transcript)
             .map_err(|err| Error::SumCheckProveError(err.to_string()))?;
 
-        println!("Point 3: sumcheck {:?} ", start.elapsed());
+        println!("Mova Point 3: sumcheck {:?} - sumcheck proof", start.elapsed());
 
         let rE_prime = sumcheck_proof.point.clone();
 
@@ -127,7 +127,7 @@ where
         let mleE1_prime = mleE1.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
         let mleE2_prime = mleE2.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
 
-        println!("Point 4: sumcheck {:?} ", start.elapsed());
+        println!("Mova Point 4: sumcheck {:?} - evaluations", start.elapsed());
 
 
         Ok((sumcheck_proof, mleE1_prime, mleE2_prime, rE_prime))
@@ -220,14 +220,14 @@ where
 
         let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
         let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);
-        println!("Point 0: point-vs-line ");
+        println!("Mova Point 0: point-vs-line - Starting");
         let start = Instant::now();
 
 
 
         let h1 = compute_h(&mleE1, &ci1.rE, &ci2.rE)?;
         let h2 = compute_h(&mleE2, &ci1.rE, &ci2.rE)?;
-        println!("Point 1: point-vs-line {:?} ", start.elapsed());
+        println!("Mova Point 1: point-vs-line {:?} - Computing h1 h2", start.elapsed());
 
 
         transcript.absorb_vec(h1.coeffs());
@@ -237,16 +237,16 @@ where
         transcript.absorb(&beta_scalar);
         let beta = transcript.get_challenge();
 
-        println!("Point 2: point-vs-line {:?} ", start.elapsed());
+        println!("Mova Point 2: point-vs-line {:?} - Challenge creation", start.elapsed());
 
 
         let mleE1_prime = h1.evaluate(&beta);
         let mleE2_prime = h2.evaluate(&beta);
 
-        println!("Point 3: point-vs-line {:?} ", start.elapsed());
+        println!("Mova Point 3: point-vs-line {:?} - h1 h2 evaluation ", start.elapsed());
 
         let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
-        println!("Point 4: point-vs-line {:?} ", start.elapsed());
+        println!("Mova Point 4: point-vs-line {:?} - computing l", start.elapsed());
 
         Ok((Self::Proof { h1, h2 }, mleE1_prime, mleE2_prime, rE_prime))
     }

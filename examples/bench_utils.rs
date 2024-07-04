@@ -4,6 +4,7 @@ use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use folding_schemes::Error;
 use num_bigint::BigUint;
 use num_traits::One;
+use rand::Rng;
 
 // would be best to move this to other file
 // pub fn get_test_r1cs<F: PrimeField>() -> R1CS<F> {
@@ -38,7 +39,7 @@ fn create_large_diagonal_matrix<F: PrimeField>() -> SparseMatrix<F> {
     // Populate the diagonal elements
     for i in 0..size {
         // Each row has one non-zero entry at (i, i) with a value of 2
-        coeffs.push(vec![(F::from(2u64), i)]);
+        coeffs.push(vec![(F::from(1u64), i)]);
     }
 
     // Instantiate SparseMatrix directly
@@ -99,6 +100,44 @@ pub fn get_test_z<F: PrimeField>(input: BigUint) -> Vec<F> {
     // Fill the rest of the vector
     z_vec.extend(std::iter::repeat(input_cubed).take(size - 2));
     to_F_vec_2(z_vec)
+}
+
+pub fn get_test_z_albert<F: PrimeField>(input: BigUint) -> Vec<F> {
+    // let one = BigUint::one();
+    // let five = &one + &one + &one + &one + &one;
+    // let size = 1 << POWER; // Calculate size only once
+    // let mut z_vec = Vec::with_capacity(size); // Preallocate memory for // efficiency
+//
+    // // Add initial elements
+    // // z_vec.push(one); // 1
+    // z_vec.push(input.clone()); // input
+//
+    // // Pre-compute input cubed since it does not change in the loop
+    // let input_cubed = &input * &input * &input;
+//
+    // // Fill the rest of the vector
+    // // z_vec.extend(std::iter::repeat(input_cubed).take(size - 2));
+    // z_vec.extend((0..size - 1).map(|i| &input_cubed * (i as u32) + i*i*i*i + i*i + i*i*i));
+
+
+    let z_vec = create_random_biguints(1<<POWER, 384);
+    // for (i, num) in z_vec.iter().enumerate() {
+    //     // println!("Random BigUint {}: {}", i + 1, num);
+    // }
+    to_F_vec_2(z_vec)
+}
+
+pub fn create_random_biguints(count: usize, max_bits: u32) -> Vec<BigUint> {
+    let mut rng = rand::thread_rng();
+
+    (0..count)
+        .map(|_| {
+            let bit_size = rng.gen_range(1..=max_bits);
+            let mut bytes = vec![0u8; (bit_size as usize + 7) / 8];
+            rng.fill(&mut bytes[..]);
+            BigUint::from_bytes_le(&bytes) % (BigUint::from(1u32) << bit_size)
+        })
+        .collect()
 }
 
 pub fn to_F_matrix<F: PrimeField>(M: Vec<Vec<usize>>) -> SparseMatrix<F> {

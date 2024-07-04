@@ -51,35 +51,45 @@ where
         z1: &[C::ScalarField],
         z2: &[C::ScalarField],
     ) -> Result<Vec<C::ScalarField>, Error> {
-        let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
-
-        // this is parallelizable (for the future)
-        // let mut Az1 = Vec::with_capacity(z1.len());
-        // Az1 = z1.iter()
-        //     .map(|&elem| elem * C::ScalarField::from(2u64))
-        //     .collect();
-        // let mut Bz1 = Vec::with_capacity(z1.len());
-        // Bz1 = z1.iter()
-        //     .map(|&elem| elem * C::ScalarField::from(2u64))
-        //     .collect();
-        // let mut Cz1 = Vec::with_capacity(z1.len());
+        // let time = Instant::now();
+        // let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
+        // println!("Cloning the huge matrices {:?}", time.elapsed());
         //
-        // Cz1 = z1.iter()
-        //     .map(|&elem| elem * C::ScalarField::from(2u64))
-        //     .collect();
-        let Az1 = mat_vec_mul(&A, z1)?;
-        let Bz1 = mat_vec_mul(&B, z1)?;
-        let Cz1 = mat_vec_mul(&C, z1)?;
-        let Az2 = mat_vec_mul(&A, z2)?;
-        let Bz2 = mat_vec_mul(&B, z2)?;
-        let Cz2 = mat_vec_mul(&C, z2)?;
-
-        let Az1_Bz2 = hadamard(&Az1, &Bz2)?;
-        let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
-        let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
-        let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
-
+        // // this is parallelizable (for the future)
+        //
+        // let Az1 = mat_vec_mul(&A, z1)?;
+        // let Bz1 = mat_vec_mul(&B, z1)?;
+        // let Cz1 = mat_vec_mul(&C, z1)?;
+        // println!("Multiplication A B C with z1 {:?}", time.elapsed());
+        // let Az2 = mat_vec_mul(&A, z2)?;
+        // let Bz2 = mat_vec_mul(&B, z2)?;
+        // let Cz2 = mat_vec_mul(&C, z2)?;
+        // println!("After Multiplication A B C with z2 {:?}", time.elapsed());
+        //
+        //
+        // let Az1_Bz2 = hadamard(&Az1, &Bz2)?;
+        // println!("hadamard Az1 Bz2  {:?}", time.elapsed());
+        //
+        // let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
+        // println!("hadamard Az2 Bz1  {:?}", time.elapsed());
+        //
+        // let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
+        // println!("Calculate u1Cz2  {:?}", time.elapsed());
+        //
+        // let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
+        // println!("Calculate u2Cz1  {:?}", time.elapsed());
+        //
+        //
+        // let temp = vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1);
+        // println!("Addition and Subtraction  {:?}", time.elapsed());
+        //
+        // temp
+        let Az1_Bz2 = hadamard(&z1, &z2)?;
+        let Az2_Bz1 = hadamard(&z2, &z1)?;
+        let u1Cz2 = vec_scalar_mul(&z2, &u1);
+        let u2Cz1 = vec_scalar_mul(&z1, &u2);
         vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1)
+
     }
 
     pub fn fold_witness(
@@ -200,21 +210,21 @@ where
         w1: &Witness<C>,
         w2: &Witness<C>,
     ) -> Result<(Proof<C, T, H>, CommittedInstance<C>, Witness<C>), Error> {
-        println!("Point 0: nifs.Prove ");
+        println!("Mova Point 0: nifs.Prove - Starting ");
         let start = Instant::now();
         let (hg_proof, mleE1_prime, mleE2_prime, rE_prime) =
             H::prove(transcript, ci1, ci2, w1, w2)?;
-        println!("Point 1: nifs.Prove {:?} ", start.elapsed());
+        println!("Mova Point 1: nifs.Prove {:?} - Homogenization Proof", start.elapsed());
 
-        transcript.absorb(&mleE1_prime);
-        transcript.absorb(&mleE2_prime);
+        // transcript.absorb(&mleE1_prime);
+        // transcript.absorb(&mleE2_prime);
 
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
-        println!("Point 2 nifs.Prove {:?} ", start.elapsed());
+        println!("Mova Point 2 nifs.Prove {:?} - Z concatenations", start.elapsed());
 
         let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
-        println!("Point 3 nifs.Prove {:?} ", start.elapsed());
+        println!("Mova Point 3 nifs.Prove {:?} - Computing T ", start.elapsed());
 
 
         let vars = log2(w1.E.len()) as usize;
@@ -226,16 +236,16 @@ where
         let mleT = dense_vec_to_dense_mle(vars, &T);
         let mleT_evaluated = mleT.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
 
-        println!("Point 4 nifs.Prove {:?} ", start.elapsed());
+        println!("Mova Point 4 nifs.Prove {:?} - T evaluation", start.elapsed());
 
-        transcript.absorb(&mleT_evaluated);
+        // transcript.absorb(&mleT_evaluated);
 
         let rho_scalar = C::ScalarField::from_le_bytes_mod_order(b"rho");
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
         let _r2 = rho * rho;
 
-        println!("Point 5 nifs.Prove {:?} ", start.elapsed());
+        println!("Mova Point 5 nifs.Prove {:?} - Challenge creation", start.elapsed());
 
         Ok((
             Proof {
