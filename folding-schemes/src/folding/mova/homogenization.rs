@@ -266,7 +266,7 @@ where
             return Err(Error::NotEqual);
         }
 
-        if proof.h2.evaluate(&C::ScalarField::one()) != ci1.mleE {
+        if proof.h2.evaluate(&C::ScalarField::one()) != ci2.mleE {
             return Err(Error::NotEqual);
         }
 

@@ -24,6 +24,8 @@ mod bench_utils;
 
 fn main() {
     println!("starting");
+    let size = 2usize.pow(16);
+
 
 
     // define r1cs and parameters
@@ -47,6 +49,13 @@ fn main() {
     let (w_1, x_1) = r1cs.split_z(&z_2);
 
     let mut witness_1 = Witness::<Projective>::new(w_1.clone(), r1cs.A.n_rows);
+    let vector = vec![1; size];
+
+    witness_1.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+
+    // witness_1.E = vec![1, 2, 3, 4].into_iter().map(|x| Fr::from(x)).collect();
+
+
 
     // generate a random evaluation point for MLE
     let size_rE_1 = log2(witness_1.E.len());
@@ -61,7 +70,14 @@ fn main() {
 
     let z_2 = get_test_z_albert(four);
     let (w_2, x_2) = r1cs.split_z(&z_2);
-    let witness_2 = Witness::<Projective>::new(w_2.clone(), r1cs.A.n_rows);
+    let mut witness_2 = Witness::<Projective>::new(w_2.clone(), r1cs.A.n_rows);
+    //
+    // //
+    // witness_2.E = vec![5, 6, 7, 8].into_iter().map(|x| Fr::from(x)).collect();
+
+    let vector = vec![2; size];
+    //
+    witness_2.E = vector.into_iter().map(|x| Fr::from(x)).collect();
 
     let size_rE_2 = log2(witness_2.E.len());
     let rE_2: Vec<_> = (0..size_rE_2).map(|_| Fr::rand(&mut rng)).collect();
@@ -76,7 +92,7 @@ fn main() {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>
+        PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>
     >::prove(
         &pedersen_params,
         &r1cs,
@@ -103,7 +119,7 @@ fn main() {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>,
+        PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>,
     >::verify(
         &mut transcript_p,
         &committed_instance_1,

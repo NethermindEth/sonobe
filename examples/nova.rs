@@ -46,6 +46,13 @@ fn main() {
 
     let poseidon_config = poseidon_canonical_config::<ark_pallas::Fr>();
     let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
+    // let vector = vec![1; size];
+    // //
+    // witness_1.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+    //
+    // let vector = vec![2; size];
+    // //
+    // witness_2.E = vector.into_iter().map(|x| Fr::from(x)).collect();
     // NIFS.P
     let start = Instant::now();
 
