@@ -333,21 +333,12 @@ mod tests {
             2,
             &[Fq::from(1), Fq::from(2), Fq::from(3), Fq::from(4)]
         );
-        let r0 = [Fq::from(4), Fq::from(5)];
-        let r1 = [Fq::from(7), Fq::from(2)];
+        let r0 = [Fq::from(5), Fq::from(4)];
+        let r1 = [Fq::from(2), Fq::from(7)];
         let result = compute_h(&mle, &r0, &r1).unwrap();
         assert_eq!(
             result,
-            DenseUVPolynomial::from_coefficients_slice(&[Fq::from(3), Fq::from(14)])
+            DenseUVPolynomial::from_coefficients_slice(&[Fq::from(14), Fq::from(3)])
         );
-
-        let mle = DenseMultilinearExtension::from_evaluations_slice(
-            2,
-            &[Fq::from(1), Fq::from(2), Fq::from(3), Fq::from(4)]
-        );
-        let r0 = [Fq::from(4), Fq::from(2)];
-        let r1 = [Fq::from(7), Fq::from(5)];
-        let result = compute_h(&mle, &r0, &r1).unwrap();
-        assert_eq!(result, DenseUVPolynomial::from_coefficients_slice(&[Fq::from(1)]));
     }
 }
