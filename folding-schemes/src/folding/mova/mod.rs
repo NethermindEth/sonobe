@@ -127,6 +127,12 @@ pub struct Witness<C: CurveGroup> {
     pub rW: C::ScalarField,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
+pub struct InstanceWitness<C: CurveGroup> {
+    pub ci: CommittedInstance<C>,
+    pub w: Witness<C>,
+}
+
 impl<C: CurveGroup> Witness<C>
 where
     <C as Group>::ScalarField: Absorb,
