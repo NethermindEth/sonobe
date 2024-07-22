@@ -30,45 +30,20 @@ where
         z1: &[C::ScalarField],
         z2: &[C::ScalarField],
     ) -> Result<Vec<C::ScalarField>, Error> {
-        // let time = Instant::now();
-        // let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
-        // println!("Cloning the huge matrices {:?}", time.elapsed());
-        //
-        // // this is parallelizable (for the future)
-        //
-        // let Az1 = mat_vec_mul(&A, z1)?;
-        // let Bz1 = mat_vec_mul(&B, z1)?;
-        // let Cz1 = mat_vec_mul(&C, z1)?;
-        // println!("Multiplication A B C with z1 {:?}", time.elapsed());
-        // let Az2 = mat_vec_mul(&A, z2)?;
-        // let Bz2 = mat_vec_mul(&B, z2)?;
-        // let Cz2 = mat_vec_mul(&C, z2)?;
-        // println!("After Multiplication A B C with z2 {:?}", time.elapsed());
-        //
-        //
-        // let Az1_Bz2 = hadamard(&Az1, &Bz2)?;
-        // println!("hadamard Az1 Bz2  {:?}", time.elapsed());
-        //
-        // let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
-        // println!("hadamard Az2 Bz1  {:?}", time.elapsed());
-        //
-        // let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
-        // println!("Calculate u1Cz2  {:?}", time.elapsed());
-        //
-        // let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
-        // println!("Calculate u2Cz1  {:?}", time.elapsed());
-        //
-        //
-        // let temp = vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1);
-        // println!("Addition and Subtraction  {:?}", time.elapsed());
-        //
-        // temp
-        let Az1_Bz2 = hadamard(&z1, &z2)?;
-        let Az2_Bz1 = hadamard(&z2, &z1)?;
-        let u1Cz2 = vec_scalar_mul(&z2, &u1);
-        let u2Cz1 = vec_scalar_mul(&z1, &u2);
+        let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
 
-        vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1)
+        // this is parallelizable (for the future)
+        let Az1 = mat_vec_mul(&A, z1)?;
+        let Bz1 = mat_vec_mul(&B, z1)?;
+        let Cz1 = mat_vec_mul(&C, z1)?;
+        let Az2 = mat_vec_mul(&A, z2)?;
+        let Bz2 = mat_vec_mul(&B, z2)?;
+        let Cz2 = mat_vec_mul(&C, z2)?;
+
+        let Az1_Bz2 = hadamard(&Az1, &Bz2)?;
+        let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
+        let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
+        let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
     }
 
     pub fn fold_witness(
