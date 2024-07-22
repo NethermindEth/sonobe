@@ -5,11 +5,10 @@ use ark_ff::PrimeField;
 use ark_poly::MultilinearExtension;
 use ark_std::{log2, Zero};
 use std::marker::PhantomData;
-use std::time::Instant;
 
-use super::homogenization::Homogenization;
+use super::homogenization::{HomogeneousEvaluationClaim, Homogenization};
 
-use super::{CommittedInstance, Witness};
+use super::{CommittedInstance, InstanceWitness, Witness};
 use crate::ccs::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
 use crate::transcript::Transcript;
@@ -51,45 +50,22 @@ where
         z1: &[C::ScalarField],
         z2: &[C::ScalarField],
     ) -> Result<Vec<C::ScalarField>, Error> {
-        // let time = Instant::now();
-        // let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
-        // println!("Cloning the huge matrices {:?}", time.elapsed());
-        //
-        // // this is parallelizable (for the future)
-        //
-        // let Az1 = mat_vec_mul(&A, z1)?;
-        // let Bz1 = mat_vec_mul(&B, z1)?;
-        // let Cz1 = mat_vec_mul(&C, z1)?;
-        // println!("Multiplication A B C with z1 {:?}", time.elapsed());
-        // let Az2 = mat_vec_mul(&A, z2)?;
-        // let Bz2 = mat_vec_mul(&B, z2)?;
-        // let Cz2 = mat_vec_mul(&C, z2)?;
-        // println!("After Multiplication A B C with z2 {:?}", time.elapsed());
-        //
-        //
-        // let Az1_Bz2 = hadamard(&Az1, &Bz2)?;
-        // println!("hadamard Az1 Bz2  {:?}", time.elapsed());
-        //
-        // let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
-        // println!("hadamard Az2 Bz1  {:?}", time.elapsed());
-        //
-        // let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
-        // println!("Calculate u1Cz2  {:?}", time.elapsed());
-        //
-        // let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
-        // println!("Calculate u2Cz1  {:?}", time.elapsed());
-        //
-        //
-        // let temp = vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1);
-        // println!("Addition and Subtraction  {:?}", time.elapsed());
-        //
-        // temp
-        let Az1_Bz2 = hadamard(&z1, &z2)?;
-        let Az2_Bz1 = hadamard(&z2, &z1)?;
-        let u1Cz2 = vec_scalar_mul(&z2, &u1);
-        let u2Cz1 = vec_scalar_mul(&z1, &u2);
-        vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1)
+        let (A, B, C) = (r1cs.A.clone(), r1cs.B.clone(), r1cs.C.clone());
 
+        // this is parallelizable (for the future)
+        let Az1 = mat_vec_mul(&A, z1)?;
+        let Bz1 = mat_vec_mul(&B, z1)?;
+        let Cz1 = mat_vec_mul(&C, z1)?;
+        let Az2 = mat_vec_mul(&A, z2)?;
+        let Bz2 = mat_vec_mul(&B, z2)?;
+        let Cz2 = mat_vec_mul(&C, z2)?;
+
+        let Az1_Bz2 = hadamard(&Az1, &Bz2)?;
+        let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
+        let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
+        let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
+
+        vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1)
     }
 
     pub fn fold_witness(
@@ -201,6 +177,7 @@ where
     //     Ok((w3, ci3))
     // }
 
+    #[allow(clippy::type_complexity)]
     pub fn prove(
         _cs_prover_params: &CS::ProverParams,
         r1cs: &R1CS<C::ScalarField>,
@@ -209,23 +186,23 @@ where
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<(Proof<C, T, H>, CommittedInstance<C>, Witness<C>), Error> {
-        println!("Mova Point 0: nifs.Prove - Starting ");
-        let start = Instant::now();
-        let (hg_proof, mleE1_prime, mleE2_prime, rE_prime) =
-            H::prove(transcript, ci1, ci2, w1, w2)?;
-        println!("Mova Point 1: nifs.Prove {:?} - Homogenization Proof", start.elapsed());
+    ) -> Result<(Proof<C, T, H>, InstanceWitness<C>), Error> {
+        let (
+            hg_proof,
+            HomogeneousEvaluationClaim {
+                mleE1_prime,
+                mleE2_prime,
+                rE_prime,
+            },
+        ) = H::prove(transcript, ci1, ci2, w1, w2)?;
 
-        // transcript.absorb(&mleE1_prime);
-        // transcript.absorb(&mleE2_prime);
+        transcript.absorb(&mleE1_prime);
+        transcript.absorb(&mleE2_prime);
 
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
-        println!("Mova Point 2 nifs.Prove {:?} - Z concatenations", start.elapsed());
 
         let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
-        println!("Mova Point 3 nifs.Prove {:?} - Computing T ", start.elapsed());
-
 
         let vars = log2(w1.E.len()) as usize;
 
@@ -236,16 +213,12 @@ where
         let mleT = dense_vec_to_dense_mle(vars, &T);
         let mleT_evaluated = mleT.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
 
-        println!("Mova Point 4 nifs.Prove {:?} - T evaluation", start.elapsed());
-
-        // transcript.absorb(&mleT_evaluated);
+        transcript.absorb(&mleT_evaluated);
 
         let rho_scalar = C::ScalarField::from_le_bytes_mod_order(b"rho");
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
         let _r2 = rho * rho;
-
-        println!("Mova Point 5 nifs.Prove {:?} - Challenge creation", start.elapsed());
 
         Ok((
             Proof {
@@ -254,16 +227,18 @@ where
                 mleE2_prime,
                 mleT: mleT_evaluated,
             },
-            Self::fold_homogenized_committed_instance(
-                rho,
-                ci1,
-                ci2,
-                &rE_prime,
-                &mleE1_prime,
-                &mleE2_prime,
-                &mleT_evaluated,
-            )?,
-            Self::fold_witness(rho, w1, w2, &T)?,
+            InstanceWitness {
+                ci: Self::fold_homogenized_committed_instance(
+                    rho,
+                    ci1,
+                    ci2,
+                    &rE_prime,
+                    &mleE1_prime,
+                    &mleE2_prime,
+                    &mleT_evaluated,
+                )?,
+                w: Self::fold_witness(rho, w1, w2, &T)?,
+            },
         ))
     }
 

@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::time::Instant;
 
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
@@ -26,6 +25,12 @@ use crate::utils::sum_check::SumCheck;
 use crate::utils::virtual_polynomial::VPAuxInfo;
 use crate::Error;
 
+pub struct HomogeneousEvaluationClaim<C: CurveGroup> {
+    pub mleE1_prime: C::ScalarField,
+    pub mleE2_prime: C::ScalarField,
+    pub rE_prime: Vec<C::ScalarField>,
+}
+
 pub trait Homogenization<C: CurveGroup, T: Transcript<C>> {
     type Proof: Clone + Debug;
 
@@ -35,15 +40,7 @@ pub trait Homogenization<C: CurveGroup, T: Transcript<C>> {
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<
-        (
-            Self::Proof,
-            C::ScalarField,      // mleE1',
-            C::ScalarField,      // mleE2',
-            Vec<C::ScalarField>, // rE=rE1'=rE2'.
-        ),
-        Error,
-    >;
+    ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error>;
 
     fn verify(
         transcript: &mut impl Transcript<C>,
@@ -88,36 +85,17 @@ where
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<
-        (
-            Self::Proof,
-            <C>::ScalarField,      // mleE1',
-            <C>::ScalarField,      // mleE2',
-            Vec<<C>::ScalarField>, // rE=rE1'=rE2'.
-        ),
-        Error,
-    > {
-        println!("Mova Point 0: sumcheck - Starting ");
-        let start = Instant::now();
-
-
+    ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error> {
         let vars = log2(w1.E.len()) as usize;
 
         let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
         transcript.absorb(&beta_scalar);
         let beta: C::ScalarField = transcript.get_challenge();
 
-        println!("Mova Point 1: sumcheck {:?} - Challenge creation", start.elapsed());
-
-
         let g = compute_g(ci1, ci2, w1, w2, &beta)?;
-        println!("Mova Point 2: sumcheck {:?} - Computing g", start.elapsed());
-
 
         let sumcheck_proof = IOPSumCheck::<C, T>::prove(&g, transcript)
             .map_err(|err| Error::SumCheckProveError(err.to_string()))?;
-
-        println!("Mova Point 3: sumcheck {:?} - sumcheck proof", start.elapsed());
 
         let rE_prime = sumcheck_proof.point.clone();
 
@@ -127,10 +105,14 @@ where
         let mleE1_prime = mleE1.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
         let mleE2_prime = mleE2.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
 
-        println!("Mova Point 4: sumcheck {:?} - evaluations", start.elapsed());
-
-
-        Ok((sumcheck_proof, mleE1_prime, mleE2_prime, rE_prime))
+        Ok((
+            sumcheck_proof,
+            HomogeneousEvaluationClaim {
+                mleE1_prime,
+                mleE2_prime,
+                rE_prime,
+            },
+        ))
     }
 
     fn verify(
@@ -207,28 +189,14 @@ where
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<
-        (
-            Self::Proof,
-            <C>::ScalarField,      // mleE1',
-            <C>::ScalarField,      // mleE2',
-            Vec<<C>::ScalarField>, // rE=rE1'=rE2'.
-        ),
-        Error,
-    > {
+    ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error> {
         let vars = log2(w1.E.len()) as usize;
 
         let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
         let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);
-        println!("Mova Point 0: point-vs-line - Starting");
-        let start = Instant::now();
-
-
 
         let h1 = compute_h(&mleE1, &ci1.rE, &ci2.rE)?;
         let h2 = compute_h(&mleE2, &ci1.rE, &ci2.rE)?;
-        println!("Mova Point 1: point-vs-line {:?} - Computing h1 h2", start.elapsed());
-
 
         transcript.absorb_vec(h1.coeffs());
         transcript.absorb_vec(h2.coeffs());
@@ -237,18 +205,19 @@ where
         transcript.absorb(&beta_scalar);
         let beta = transcript.get_challenge();
 
-        println!("Mova Point 2: point-vs-line {:?} - Challenge creation", start.elapsed());
-
-
         let mleE1_prime = h1.evaluate(&beta);
         let mleE2_prime = h2.evaluate(&beta);
 
-        println!("Mova Point 3: point-vs-line {:?} - h1 h2 evaluation ", start.elapsed());
-
         let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
-        println!("Mova Point 4: point-vs-line {:?} - computing l", start.elapsed());
 
-        Ok((Self::Proof { h1, h2 }, mleE1_prime, mleE2_prime, rE_prime))
+        Ok((
+            Self::Proof { h1, h2 },
+            HomogeneousEvaluationClaim {
+                mleE1_prime,
+                mleE2_prime,
+                rE_prime,
+            },
+        ))
     }
 
     fn verify(
@@ -266,7 +235,7 @@ where
             return Err(Error::NotEqual);
         }
 
-        if proof.h2.evaluate(&C::ScalarField::one()) != ci2.mleE {
+        if proof.h2.evaluate(&C::ScalarField::one()) != ci1.mleE {
             return Err(Error::NotEqual);
         }
 
@@ -306,7 +275,8 @@ fn compute_h<F: PrimeField>(
     r0: &[F],
     r1: &[F],
 ) -> Result<DensePolynomial<F>, Error> {
-    if r0.len() != r1.len() {
+    let nv = mle.num_vars;
+    if r0.len() != r1.len() || r0.len() != nv {
         return Err(Error::NotEqual);
     }
 
@@ -315,16 +285,11 @@ fn compute_h<F: PrimeField>(
         .iter()
         .map(|&x| DensePolynomial::from_coefficients_slice(&[x]))
         .collect();
-    let nv = mle.num_vars;
-
-    if r0.len() != nv {
-        return Err(Error::NotEqual);
-    }
 
     // evaluate single variable of partial point from left to right
     for i in 1..nv + 1 {
         let r = DensePolynomial::<F>::from_coefficients_slice(&[r0[i - 1], r1[i - 1] - r0[i - 1]]);
-        for b in 0..(1 << (nv - i)) {
+        for b in 0..1 << (nv - i) {
             let left = &poly[b << 1];
             let right = &poly[(b << 1) + 1];
             poly[b] = left + &(&r * &(right - left));
@@ -333,4 +298,81 @@ fn compute_h<F: PrimeField>(
 
     // Is it even fine?
     Ok(poly.swap_remove(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_h;
+    use ark_pallas::Fq;
+    use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial};
+
+    #[test]
+    fn test_compute_h() {
+        let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fq::from(1), Fq::from(2)]);
+        let r0 = [Fq::from(5)];
+        let r1 = [Fq::from(6)];
+        let result = compute_h(&mle, &r0, &r1).unwrap();
+        assert_eq!(
+            result,
+            DenseUVPolynomial::from_coefficients_slice(&[Fq::from(6), Fq::from(1)])
+        );
+
+        let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fq::from(1), Fq::from(2)]);
+        let r0 = [Fq::from(4)];
+        let r1 = [Fq::from(7)];
+        let result = compute_h(&mle, &r0, &r1).unwrap();
+        assert_eq!(
+            result,
+            DenseUVPolynomial::from_coefficients_slice(&[Fq::from(5), Fq::from(3)])
+        );
+
+        let mle = DenseMultilinearExtension::from_evaluations_slice(
+            2,
+            &[Fq::from(1), Fq::from(2), Fq::from(3), Fq::from(4)],
+        );
+        let r0 = [Fq::from(5), Fq::from(4)];
+        let r1 = [Fq::from(2), Fq::from(7)];
+        let result = compute_h(&mle, &r0, &r1).unwrap();
+        assert_eq!(
+            result,
+            DenseUVPolynomial::from_coefficients_slice(&[Fq::from(14), Fq::from(3)])
+        );
+        let mle = DenseMultilinearExtension::from_evaluations_slice(
+            3,
+            &[
+                Fq::from(1),
+                Fq::from(2),
+                Fq::from(3),
+                Fq::from(4),
+                Fq::from(5),
+                Fq::from(6),
+                Fq::from(7),
+                Fq::from(8),
+            ],
+        );
+        let r0 = [Fq::from(1), Fq::from(2), Fq::from(3)];
+        let r1 = [Fq::from(5), Fq::from(6), Fq::from(7)];
+        let result = compute_h(&mle, &r0, &r1).unwrap();
+        assert_eq!(
+            result,
+            DenseUVPolynomial::from_coefficients_slice(&[Fq::from(18), Fq::from(28)])
+        );
+    }
+    #[test]
+    fn test_compute_h_errors() {
+        let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fq::from(1), Fq::from(2)]);
+        let r0 = [Fq::from(5)];
+        let r1 = [];
+        let result = compute_h(&mle, &r0, &r1);
+        assert!(result.is_err());
+
+        let mle = DenseMultilinearExtension::from_evaluations_slice(
+            2,
+            &[Fq::from(1), Fq::from(2), Fq::from(1), Fq::from(2)],
+        );
+        let r0 = [Fq::from(4)];
+        let r1 = [Fq::from(7)];
+        let result = compute_h(&mle, &r0, &r1);
+        assert!(result.is_err())
+    }
 }
