@@ -1,3 +1,4 @@
+use std::env;
 use ark_ff::PrimeField;
 use ark_pallas::{Fr, Projective};
 use ark_std::log2;
@@ -5,7 +6,7 @@ use ark_std::UniformRand;
 use folding_schemes::ccs::r1cs::R1CS;
 use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::CommitmentScheme;
-use folding_schemes::folding::mova::homogenization::{PointVsLineHomogenization, SumCheckHomogenization};
+use folding_schemes::folding::mova::homogenization::{Homogenization, PointVsLineHomogenization, SumCheckHomogenization};
 use folding_schemes::folding::mova::nifs::NIFS;
 use folding_schemes::folding::mova::Witness;
 use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
@@ -15,7 +16,7 @@ use rand::Rng;
 use std::mem::size_of_val;
 use std::time::{Duration, Instant};
 
-use crate::bench_utils::{get_test_r1cs, get_test_z_albert};
+use crate::bench_utils::{get_test_r1cs, get_test_z, write_to_csv};
 use ark_ff::BigInteger;
 use folding_schemes::folding::mova::traits::MovaR1CS;
 use num_traits::{One, Zero};
@@ -25,12 +26,9 @@ use csv::Writer;
 
 mod bench_utils;
 
-fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
+fn mova_benchmark<H: Homogenization<Projective, PoseidonTranscript<Projective>>>(power: usize, prove_times: &mut Vec<Duration>) {
 
-    // let size = 2usize.pow(16);
     let size = 1 << power;
-    // println!("{:?}",size);
-    // println!("{:?}",1<<16);
 
     // define r1cs and parameters
     let r1cs: R1CS<Fr> = get_test_r1cs(power);
@@ -39,30 +37,19 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let poseidon_config = poseidon_canonical_config::<ark_pallas::Fr>();
     let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
 
-    // let big_number: BigUint = One::one() ; // This creates a 250-bit number.
-
-    // // INSTANCE 1
-    let big_num: BigUint = BigUint::one() << 100;
-
-    println!("Big_Num {:?}", big_num);
-
-    let z_1: Vec<Fr> = get_test_z_albert(big_num.clone(), power);
-
-    // println!("Z Instance {:?}", z_2);
+    // INSTANCE 1
+    let z_1: Vec<Fr> = get_test_z(power);
 
     let (w_1, x_1) = r1cs.split_z(&z_1);
 
     let mut witness_1 = Witness::<Projective>::new(w_1.clone(), r1cs.A.n_rows);
     let vector = vec![1; size];
 
+    // Populate error vector
     witness_1.E = vector.into_iter().map(|x| Fr::from(x)).collect();
 
-    // witness_1.E = vec![1, 2, 3, 4].into_iter().map(|x| Fr::from(x)).collect();
-
-
-
     // generate a random evaluation point for MLE
-    let size_rE_1 = log2(witness_1.E.len());
+    let size_rE_1 = log2(size);
     let rE_1: Vec<_> = (0..size_rE_1).map(|_| Fr::rand(&mut rng)).collect();
 
     let committed_instance_1 = witness_1
@@ -70,23 +57,19 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         .unwrap();
 
     // INSTANCE 2
-    let four = BigUint::one() + BigUint::one() + BigUint::one() + BigUint::one();
-
-    let z_2 = get_test_z_albert(four, power);
+    let z_2 = get_test_z( power);
     let (w_2, x_2) = r1cs.split_z(&z_2);
     let mut witness_2 = Witness::<Projective>::new(w_2.clone(), r1cs.A.n_rows);
-    //
-    // //
-    // witness_2.E = vec![5, 6, 7, 8].into_iter().map(|x| Fr::from(x)).collect();
 
     let vector = vec![2; size];
-    //
+
+    // Populate error vector
     witness_2.E = vector.into_iter().map(|x| Fr::from(x)).collect();
 
-    let size_rE_2 = log2(witness_2.E.len());
+    let size_rE_2 = log2(size);
     let rE_2: Vec<_> = (0..size_rE_2).map(|_| Fr::rand(&mut rng)).collect();
 
-    let mut committed_instance_2 = witness_2
+    let committed_instance_2 = witness_2
         .commit::<Pedersen<Projective>>(&pedersen_params, x_2, rE_2)
         .unwrap();
 
@@ -96,7 +79,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>
+        H
     >::prove(
         &pedersen_params,
         &r1cs,
@@ -111,7 +94,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let prove_time = start.elapsed();
     prove_times.push(prove_time);
     println!(
-        "Mova prove time (point-vs-line variant) {:?}",
+        "Mova prove time {:?}",
         prove_time
     );
     println!("Mova bytes used {:?}", size_of_val(&result));
@@ -125,7 +108,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         Projective,
         Pedersen<Projective>,
         PoseidonTranscript<Projective>,
-        PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>,
+        H
     >::verify(
         &mut transcript_p,
         &committed_instance_1,
@@ -140,39 +123,52 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     }
 }
 
-fn write_to_csv(prove_times: &mut Vec<Duration>) -> Result<(), Box<dyn Error>> {
-    let mut wtr = Writer::from_path("prove_times.csv")?;
-    wtr.write_record(&["x", "y", "z"])?;
-    wtr.flush()?;
-    Ok(())
-}
+
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let homogenization = &args[1];
+    match homogenization.as_str() {
+        "sumcheck" | "point" => (),
+        _ => {
+            eprintln!("Expected 'sumcheck' or 'point' as an input argument");
+            std::process::exit(1);
+        }
+    }
+
     println!("starting");
 
-    let pows: Vec<usize> = (10..24).collect();
+    let pows: Vec<usize> = (10..16).collect();
     println!("{:?}", pows);
 
-    let mut prove_times: Vec<Duration> = Vec::new();
+    let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());
 
-    for pow in pows {
-        mova_benchmark(pow, &mut prove_times);
+    if homogenization.as_str() == "sumcheck" {
+        for pow in &pows {
+            println!("{}", pow);
+            mova_benchmark::<SumCheckHomogenization<Projective, PoseidonTranscript<Projective>>>(*pow, &mut prove_times);
+        }
+    } else {
+        for pow in &pows {
+            println!("{}", pow);
+            mova_benchmark::<PointVsLineHomogenization<Projective, PoseidonTranscript<Projective>>>(*pow, &mut prove_times);
+        }
     }
 
-    let pows_print: Vec<usize> = (10..24).collect();
-    println!("Powers {:?}", pows_print);
-
+    println!("Powers {:?}", pows);
     println!("Prove times {:?}", prove_times);
 
-    println!(
-        "| {0: <10} | {1: <10} |",
-        "2^pow", "prove time"
-    );
-    for i in 0..prove_times.len() {
-        println!("| {0: <10} | {1:?} |", pows_print[i], prove_times[i]);
+    println!("| {0: <10} | {1: <10} |", "2^pow", "prove time");
+    for (pow, prove_time) in pows.iter().zip(prove_times.iter()) {
+        println!("| {0: <10} | {1:?} |", pow, prove_time);
     }
 
-    // write_to_csv(&mut prove_times);
+    if let Err(e) = write_to_csv(&pows, &prove_times, format!("mova_{}_prove_times.csv", homogenization)) {
+        eprintln!("Failed to write to CSV: {}", e);
+    } else {
+        println!("CSV file has been successfully written.");
+    }
 
-    
 }
+

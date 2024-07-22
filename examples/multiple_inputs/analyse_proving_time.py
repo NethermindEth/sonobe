@@ -1,11 +1,23 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+
 
 if __name__ == "__main__":
     # Later need to read this from csv
-    powers = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
-    prove_times_mova = [1.091167, 1.415209, 1.959292, 3.783584, 6.825875, 12.65875, 27.475917, 49.278416, 104.126292, 210.376334, 423.0625, 802.578584, 1817.999292, 5518.4255]
-    prove_times_nova = [3.464959, 4.878416, 7.162625, 12.449458, 25.237625, 45.0025, 71.196208, 170.822917, 284.674875, 622.635709, 1147.108875, 2197.209292, 4823.36525, 11638.812291]
+    # powers = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    # prove_times_mova = [1.091167, 1.415209, 1.959292, 3.783584, 6.825875, 12.65875, 27.475917, 49.278416, 104.126292, 210.376334, 423.0625, 802.578584, 1817.999292, 5518.4255]
+    # prove_times_nova = [3.464959, 4.878416, 7.162625, 12.449458, 25.237625, 45.0025, 71.196208, 170.822917, 284.674875, 622.635709, 1147.108875, 2197.209292, 4823.36525, 11638.812291]
+    mova_data = pd.read_csv('mova_point_prove_times.csv')
+    powers = mova_data['pow'].tolist()
+    prove_times_mova = mova_data['prove_time'].tolist()
+
+    nova_data = pd.read_csv('nova_prove_times.csv')
+    prove_times_nova = nova_data['prove_time'].tolist()
+
+
+
+
 
     powers = list(map(str, powers))
     powers = ["2^" + pw for pw in powers]
