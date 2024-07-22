@@ -77,3 +77,6 @@ path = "../examples/nova.rs"
 name = "mova-multi-inputs"
 path = "../examples/multiple_inputs/mova.rs"
 
+[[example]]
+name = "nova-multi-inputs"
+path = "../examples/multiple_inputs/nova.rs"
