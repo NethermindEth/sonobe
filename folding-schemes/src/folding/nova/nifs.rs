@@ -1,6 +1,6 @@
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
-use ark_std::{UniformRand, Zero};
+use ark_std::{ Zero};
 use std::marker::PhantomData;
 use std::time::Instant;
 
@@ -44,6 +44,8 @@ where
         let Az2_Bz1 = hadamard(&Az2, &Bz1)?;
         let u1Cz2 = vec_scalar_mul(&Cz2, &u1);
         let u2Cz1 = vec_scalar_mul(&Cz1, &u2);
+
+        vec_sub(&vec_sub(&vec_add(&Az1_Bz2, &Az2_Bz1)?, &u1Cz2)?, &u2Cz1)
     }
 
     pub fn fold_witness(

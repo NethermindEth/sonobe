@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
