@@ -6,9 +6,9 @@ use ark_poly::MultilinearExtension;
 use ark_std::{log2, Zero};
 use std::marker::PhantomData;
 
-use super::homogenization::Homogenization;
+use super::homogenization::{HomogeneousEvaluationClaim, Homogenization};
 
-use super::{CommittedInstance, Witness};
+use super::{CommittedInstance, InstanceWitness, Witness};
 use crate::ccs::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
 use crate::transcript::Transcript;
@@ -177,6 +177,7 @@ where
     //     Ok((w3, ci3))
     // }
 
+    #[allow(clippy::type_complexity)]
     pub fn prove(
         _cs_prover_params: &CS::ProverParams,
         r1cs: &R1CS<C::ScalarField>,
@@ -185,9 +186,15 @@ where
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<(Proof<C, T, H>, CommittedInstance<C>, Witness<C>), Error> {
-        let (hg_proof, mleE1_prime, mleE2_prime, rE_prime) =
-            H::prove(transcript, ci1, ci2, w1, w2)?;
+    ) -> Result<(Proof<C, T, H>, InstanceWitness<C>), Error> {
+        let (
+            hg_proof,
+            HomogeneousEvaluationClaim {
+                mleE1_prime,
+                mleE2_prime,
+                rE_prime,
+            },
+        ) = H::prove(transcript, ci1, ci2, w1, w2)?;
 
         transcript.absorb(&mleE1_prime);
         transcript.absorb(&mleE2_prime);
@@ -220,16 +227,18 @@ where
                 mleE2_prime,
                 mleT: mleT_evaluated,
             },
-            Self::fold_homogenized_committed_instance(
-                rho,
-                ci1,
-                ci2,
-                &rE_prime,
-                &mleE1_prime,
-                &mleE2_prime,
-                &mleT_evaluated,
-            )?,
-            Self::fold_witness(rho, w1, w2, &T)?,
+            InstanceWitness {
+                ci: Self::fold_homogenized_committed_instance(
+                    rho,
+                    ci1,
+                    ci2,
+                    &rE_prime,
+                    &mleE1_prime,
+                    &mleE2_prime,
+                    &mleT_evaluated,
+                )?,
+                w: Self::fold_witness(rho, w1, w2, &T)?,
+            },
         ))
     }
 
