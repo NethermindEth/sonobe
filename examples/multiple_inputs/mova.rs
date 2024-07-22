@@ -102,7 +102,7 @@ fn mova_benchmark<H: Homogenization<Projective, PoseidonTranscript<Projective>>>
     //NIFS.V
     let poseidon_config = poseidon_canonical_config::<ark_pallas::Fr>();
     let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
-    let (proof, _, folded_w) = result;
+    let (proof, instance_witness) = result;
 
     let folded_committed_instance = NIFS::<
         Projective,
@@ -116,7 +116,7 @@ fn mova_benchmark<H: Homogenization<Projective, PoseidonTranscript<Projective>>>
         &proof,
     )
     .unwrap();
-    let check = r1cs.check_relaxed_instance_relation(&folded_w, &folded_committed_instance);
+    let check = r1cs.check_relaxed_instance_relation(&instance_witness.w, &folded_committed_instance);
     match check {
         Ok(_) => println!("The relation check was successful."),
         Err(e) => println!("The relation check failed: {:?}", e),
@@ -139,7 +139,7 @@ fn main() {
 
     println!("starting");
 
-    let pows: Vec<usize> = (10..16).collect();
+    let pows: Vec<usize> = (10..24).collect();
     println!("{:?}", pows);
 
     let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());

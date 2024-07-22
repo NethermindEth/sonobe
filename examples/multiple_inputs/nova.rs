@@ -111,7 +111,7 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
 fn main() {
     println!("starting");
 
-    let pows: Vec<usize> = (10..16).collect();
+    let pows: Vec<usize> = (10..24).collect();
     println!("{:?}", pows);
 
     let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());
