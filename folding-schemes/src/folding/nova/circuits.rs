@@ -1,11 +1,7 @@
 /// contains [Nova](https://eprint.iacr.org/2021/370.pdf) related circuits
-use ark_crypto_primitives::crh::{
-    poseidon::constraints::{CRHGadget, CRHParametersVar},
-    CRHSchemeGadget,
-};
 use ark_crypto_primitives::sponge::{
-    constraints::CryptographicSpongeVar,
-    poseidon::{constraints::PoseidonSpongeVar, PoseidonConfig, PoseidonSponge},
+    constraints::{AbsorbGadget, CryptographicSpongeVar},
+    poseidon::{constraints::PoseidonSpongeVar, PoseidonConfig},
     Absorb, CryptographicSponge,
 };
 use ark_ec::{CurveGroup, Group};
@@ -17,27 +13,24 @@ use ark_r1cs_std::{
     fields::{fp::FpVar, FieldVar},
     groups::GroupOpsBounds,
     prelude::CurveVar,
+    uint8::UInt8,
     R1CSVar, ToConstraintFieldGadget,
 };
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, Namespace, SynthesisError};
 use ark_std::{fmt::Debug, One, Zero};
 use core::{borrow::Borrow, marker::PhantomData};
 
-use super::{
-    cyclefold::{
-        CycleFoldChallengeGadget, CycleFoldCommittedInstanceVar, NIFSFullGadget, CF_IO_LEN,
-    },
-    CommittedInstance,
-};
+use super::{CommittedInstance, NOVA_CF_N_POINTS};
 use crate::constants::N_BITS_RO;
 use crate::folding::circuits::{
-    nonnative::{
-        affine::{nonnative_affine_to_field_elements, NonNativeAffineVar},
-        uint::NonNativeUintVar,
+    cyclefold::{
+        cf_io_len, CycleFoldChallengeGadget, CycleFoldCommittedInstanceVar, NIFSFullGadget,
     },
+    nonnative::{affine::NonNativeAffineVar, uint::NonNativeUintVar},
     CF1, CF2,
 };
 use crate::frontend::FCircuit;
+use crate::transcript::{AbsorbNonNativeGadget, Transcript, TranscriptVar};
 
 /// CommittedInstanceVar contains the u, x, cmE and cmW values which are folded on the main Nova
 /// constraints field (E1::Fr, where E1 is the main curve). The peculiarity is that cmE and cmW are
@@ -80,6 +73,26 @@ where
     }
 }
 
+impl<C> AbsorbGadget<C::ScalarField> for CommittedInstanceVar<C>
+where
+    C: CurveGroup,
+    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField,
+{
+    fn to_sponge_bytes(&self) -> Result<Vec<UInt8<C::ScalarField>>, SynthesisError> {
+        unimplemented!()
+    }
+
+    fn to_sponge_field_elements(&self) -> Result<Vec<FpVar<C::ScalarField>>, SynthesisError> {
+        Ok([
+            vec![self.u.clone()],
+            self.x.clone(),
+            self.cmE.to_constraint_field()?,
+            self.cmW.to_constraint_field()?,
+        ]
+        .concat())
+    }
+}
+
 impl<C> CommittedInstanceVar<C>
 where
     C: CurveGroup,
@@ -93,25 +106,22 @@ where
     /// Additionally it returns the vector of the field elements from the self parameters, so they
     /// can be reused in other gadgets avoiding recalculating (reconstraining) them.
     #[allow(clippy::type_complexity)]
-    pub fn hash(
+    pub fn hash<S: CryptographicSponge, T: TranscriptVar<CF1<C>, S>>(
         self,
-        crh_params: &CRHParametersVar<CF1<C>>,
+        sponge: &T,
+        pp_hash: FpVar<CF1<C>>,
         i: FpVar<CF1<C>>,
         z_0: Vec<FpVar<CF1<C>>>,
         z_i: Vec<FpVar<CF1<C>>>,
     ) -> Result<(FpVar<CF1<C>>, Vec<FpVar<CF1<C>>>), SynthesisError> {
-        let U_vec = [
-            vec![self.u],
-            self.x,
-            self.cmE.to_constraint_field()?,
-            self.cmW.to_constraint_field()?,
-        ]
-        .concat();
-        let input = [vec![i], z_0, z_i, U_vec.clone()].concat();
-        Ok((
-            CRHGadget::<C::ScalarField>::evaluate(crh_params, &input)?,
-            U_vec,
-        ))
+        let mut sponge = sponge.clone();
+        let U_vec = self.to_sponge_field_elements()?;
+        sponge.absorb(&pp_hash)?;
+        sponge.absorb(&i)?;
+        sponge.absorb(&z_0)?;
+        sponge.absorb(&z_i)?;
+        sponge.absorb(&U_vec)?;
+        Ok((sponge.squeeze_field_elements(1)?.pop().unwrap(), U_vec))
     }
 }
 
@@ -175,63 +185,33 @@ where
     <C as CurveGroup>::BaseField: PrimeField,
     <C as Group>::ScalarField: Absorb,
 {
-    pub fn get_challenge_native(
-        poseidon_config: &PoseidonConfig<C::ScalarField>,
+    pub fn get_challenge_native<T: Transcript<C::ScalarField>>(
+        transcript: &mut T,
+        pp_hash: C::ScalarField, // public params hash
         U_i: CommittedInstance<C>,
         u_i: CommittedInstance<C>,
         cmT: C,
-    ) -> Result<Vec<bool>, SynthesisError> {
-        let (U_cmE_x, U_cmE_y) = nonnative_affine_to_field_elements::<C>(U_i.cmE)?;
-        let (U_cmW_x, U_cmW_y) = nonnative_affine_to_field_elements::<C>(U_i.cmW)?;
-        let (u_cmE_x, u_cmE_y) = nonnative_affine_to_field_elements::<C>(u_i.cmE)?;
-        let (u_cmW_x, u_cmW_y) = nonnative_affine_to_field_elements::<C>(u_i.cmW)?;
-        let (cmT_x, cmT_y) = nonnative_affine_to_field_elements::<C>(cmT)?;
-
-        let mut sponge = PoseidonSponge::<C::ScalarField>::new(poseidon_config);
-        let input = vec![
-            vec![U_i.u],
-            U_i.x.clone(),
-            U_cmE_x,
-            U_cmE_y,
-            U_cmW_x,
-            U_cmW_y,
-            vec![u_i.u],
-            u_i.x.clone(),
-            u_cmE_x,
-            u_cmE_y,
-            u_cmW_x,
-            u_cmW_y,
-            cmT_x,
-            cmT_y,
-        ]
-        .concat();
-        sponge.absorb(&input);
-        let bits = sponge.squeeze_bits(N_BITS_RO);
-        Ok(bits)
+    ) -> Vec<bool> {
+        transcript.absorb(&pp_hash);
+        transcript.absorb(&U_i);
+        transcript.absorb(&u_i);
+        transcript.absorb_nonnative(&cmT);
+        transcript.squeeze_bits(N_BITS_RO)
     }
 
     // compatible with the native get_challenge_native
-    pub fn get_challenge_gadget(
-        cs: ConstraintSystemRef<C::ScalarField>,
-        poseidon_config: &PoseidonConfig<C::ScalarField>,
+    pub fn get_challenge_gadget<S: CryptographicSponge, T: TranscriptVar<CF1<C>, S>>(
+        transcript: &mut T,
+        pp_hash: FpVar<CF1<C>>,      // public params hash
         U_i_vec: Vec<FpVar<CF1<C>>>, // apready processed input, so we don't have to recompute these values
         u_i: CommittedInstanceVar<C>,
         cmT: NonNativeAffineVar<C>,
     ) -> Result<Vec<Boolean<C::ScalarField>>, SynthesisError> {
-        let mut sponge = PoseidonSpongeVar::<C::ScalarField>::new(cs, poseidon_config);
-
-        let input: Vec<FpVar<C::ScalarField>> = [
-            U_i_vec,
-            vec![u_i.u.clone()],
-            u_i.x.clone(),
-            u_i.cmE.to_constraint_field()?,
-            u_i.cmW.to_constraint_field()?,
-            cmT.to_constraint_field()?,
-        ]
-        .concat();
-        sponge.absorb(&input)?;
-        let bits = sponge.squeeze_bits(N_BITS_RO)?;
-        Ok(bits)
+        transcript.absorb(&pp_hash)?;
+        transcript.absorb(&U_i_vec)?;
+        transcript.absorb(&u_i)?;
+        transcript.absorb_nonnative(&cmT)?;
+        transcript.squeeze_bits(N_BITS_RO)
     }
 }
 
@@ -249,6 +229,7 @@ pub struct AugmentedFCircuit<
 {
     pub _gc2: PhantomData<GC2>,
     pub poseidon_config: PoseidonConfig<CF1<C1>>,
+    pub pp_hash: Option<CF1<C1>>,
     pub i: Option<CF1<C1>>,
     pub i_usize: Option<usize>,
     pub z_0: Option<Vec<C1::ScalarField>>,
@@ -282,6 +263,7 @@ where
         Self {
             _gc2: PhantomData,
             poseidon_config: poseidon_config.clone(),
+            pp_hash: None,
             i: None,
             i_usize: None,
             z_0: None,
@@ -319,6 +301,9 @@ where
     for<'a> &'a GC2: GroupOpsBounds<'a, C2, GC2>,
 {
     fn generate_constraints(self, cs: ConstraintSystemRef<CF1<C1>>) -> Result<(), SynthesisError> {
+        let pp_hash = FpVar::<CF1<C1>>::new_witness(cs.clone(), || {
+            Ok(self.pp_hash.unwrap_or_else(CF1::<C1>::zero))
+        })?;
         let i = FpVar::<CF1<C1>>::new_witness(cs.clone(), || {
             Ok(self.i.unwrap_or_else(CF1::<C1>::zero))
         })?;
@@ -352,17 +337,17 @@ where
         let cmT =
             NonNativeAffineVar::new_witness(cs.clone(), || Ok(self.cmT.unwrap_or_else(C1::zero)))?;
 
-        let cf_u_dummy = CommittedInstance::dummy(CF_IO_LEN);
+        let cf_u_dummy = CommittedInstance::dummy(cf_io_len(NOVA_CF_N_POINTS));
         let cf_U_i = CycleFoldCommittedInstanceVar::<C2, GC2>::new_witness(cs.clone(), || {
             Ok(self.cf_U_i.unwrap_or(cf_u_dummy.clone()))
         })?;
         let cf1_cmT = GC2::new_witness(cs.clone(), || Ok(self.cf1_cmT.unwrap_or_else(C2::zero)))?;
         let cf2_cmT = GC2::new_witness(cs.clone(), || Ok(self.cf2_cmT.unwrap_or_else(C2::zero)))?;
 
-        let crh_params = CRHParametersVar::<C1::ScalarField>::new_constant(
-            cs.clone(),
-            self.poseidon_config.clone(),
-        )?;
+        // `sponge` is for digest computation.
+        let sponge = PoseidonSpongeVar::<C1::ScalarField>::new(cs.clone(), &self.poseidon_config);
+        // `transcript` is for challenge generation.
+        let mut transcript = sponge.clone();
 
         // get z_{i+1} from the F circuit
         let i_usize = self.i_usize.unwrap_or(0);
@@ -375,11 +360,15 @@ where
         // Primary Part
         // P.1. Compute u_i.x
         // u_i.x[0] = H(i, z_0, z_i, U_i)
-        let (u_i_x, U_i_vec) =
-            U_i.clone()
-                .hash(&crh_params, i.clone(), z_0.clone(), z_i.clone())?;
+        let (u_i_x, U_i_vec) = U_i.clone().hash(
+            &sponge,
+            pp_hash.clone(),
+            i.clone(),
+            z_0.clone(),
+            z_i.clone(),
+        )?;
         // u_i.x[1] = H(cf_U_i)
-        let (cf_u_i_x, cf_U_i_vec) = cf_U_i.clone().hash(&crh_params)?;
+        let (cf_u_i_x, cf_U_i_vec) = cf_U_i.clone().hash(&sponge, pp_hash.clone())?;
 
         // P.2. Construct u_i
         let u_i = CommittedInstanceVar {
@@ -399,8 +388,8 @@ where
 
         // compute r = H(u_i, U_i, cmT)
         let r_bits = ChallengeGadget::<C1>::get_challenge_gadget(
-            cs.clone(),
-            &self.poseidon_config,
+            &mut transcript,
+            pp_hash.clone(),
             U_i_vec,
             u_i.clone(),
             cmT.clone(),
@@ -425,13 +414,15 @@ where
         // Base case: u_{i+1}.x[0] == H((i+1, z_0, z_{i+1}, U_{\bot})
         // Non-base case: u_{i+1}.x[0] == H((i+1, z_0, z_{i+1}, U_{i+1})
         let (u_i1_x, _) = U_i1.clone().hash(
-            &crh_params,
+            &sponge,
+            pp_hash.clone(),
             i + FpVar::<CF1<C1>>::one(),
             z_0.clone(),
             z_i1.clone(),
         )?;
         let (u_i1_x_base, _) = CommittedInstanceVar::new_constant(cs.clone(), u_dummy)?.hash(
-            &crh_params,
+            &sponge,
+            pp_hash.clone(),
             FpVar::<CF1<C1>>::one(),
             z_0.clone(),
             z_i1.clone(),
@@ -484,8 +475,8 @@ where
         // compute cf1_r = H(cf1_u_i, cf_U_i, cf1_cmT)
         // cf_r_bits is denoted by rho* in the paper.
         let cf1_r_bits = CycleFoldChallengeGadget::<C2, GC2>::get_challenge_gadget(
-            cs.clone(),
-            &self.poseidon_config,
+            &mut transcript,
+            pp_hash.clone(),
             cf_U_i_vec,
             cf1_u_i.clone(),
             cf1_cmT.clone(),
@@ -507,9 +498,9 @@ where
 
         // same for cf2_r:
         let cf2_r_bits = CycleFoldChallengeGadget::<C2, GC2>::get_challenge_gadget(
-            cs.clone(),
-            &self.poseidon_config,
-            cf1_U_i1.to_constraint_field()?,
+            &mut transcript,
+            pp_hash.clone(),
+            cf1_U_i1.to_native_sponge_field_elements()?,
             cf2_u_i.clone(),
             cf2_cmT.clone(),
         )?;
@@ -530,10 +521,10 @@ where
         // P.4.b compute and check the second output of F'
         // Base case: u_{i+1}.x[1] == H(cf_U_{\bot})
         // Non-base case: u_{i+1}.x[1] == H(cf_U_{i+1})
-        let (cf_u_i1_x, _) = cf_U_i1.clone().hash(&crh_params)?;
+        let (cf_u_i1_x, _) = cf_U_i1.clone().hash(&sponge, pp_hash.clone())?;
         let (cf_u_i1_x_base, _) =
             CycleFoldCommittedInstanceVar::new_constant(cs.clone(), cf_u_dummy)?
-                .hash(&crh_params)?;
+                .hash(&sponge, pp_hash)?;
         let cf_x = FpVar::new_input(cs.clone(), || {
             Ok(self.cf_x.unwrap_or(cf_u_i1_x_base.value()?))
         })?;
@@ -547,6 +538,7 @@ where
 pub mod tests {
     use super::*;
     use ark_bn254::{Fr, G1Projective as Projective};
+    use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
     use ark_ff::BigInteger;
     use ark_relations::r1cs::ConstraintSystem;
     use ark_std::UniformRand;
@@ -611,6 +603,8 @@ pub mod tests {
     fn test_committed_instance_hash() {
         let mut rng = ark_std::test_rng();
         let poseidon_config = poseidon_canonical_config::<Fr>();
+        let sponge = PoseidonSponge::<Fr>::new(&poseidon_config);
+        let pp_hash = Fr::from(42u32); // only for test
 
         let i = Fr::from(3_u32);
         let z_0 = vec![Fr::from(3_u32)];
@@ -623,22 +617,23 @@ pub mod tests {
         };
 
         // compute the CommittedInstance hash natively
-        let h = ci
-            .hash(&poseidon_config, i, z_0.clone(), z_i.clone())
-            .unwrap();
+        let h = ci.hash(&sponge, pp_hash, i, z_0.clone(), z_i.clone());
 
         let cs = ConstraintSystem::<Fr>::new_ref();
 
+        let pp_hashVar = FpVar::<Fr>::new_witness(cs.clone(), || Ok(pp_hash)).unwrap();
         let iVar = FpVar::<Fr>::new_witness(cs.clone(), || Ok(i)).unwrap();
         let z_0Var = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || Ok(z_0.clone())).unwrap();
         let z_iVar = Vec::<FpVar<Fr>>::new_witness(cs.clone(), || Ok(z_i.clone())).unwrap();
         let ciVar =
             CommittedInstanceVar::<Projective>::new_witness(cs.clone(), || Ok(ci.clone())).unwrap();
 
-        let crh_params = CRHParametersVar::<Fr>::new_constant(cs.clone(), poseidon_config).unwrap();
+        let sponge = PoseidonSpongeVar::<Fr>::new(cs.clone(), &poseidon_config);
 
         // compute the CommittedInstance hash in-circuit
-        let (hVar, _) = ciVar.hash(&crh_params, iVar, z_0Var, z_iVar).unwrap();
+        let (hVar, _) = ciVar
+            .hash(&sponge, pp_hashVar, iVar, z_0Var, z_iVar)
+            .unwrap();
         assert!(cs.is_satisfied().unwrap());
 
         // check that the natively computed and in-circuit computed hashes match
@@ -650,6 +645,7 @@ pub mod tests {
     fn test_challenge_gadget() {
         let mut rng = ark_std::test_rng();
         let poseidon_config = poseidon_canonical_config::<Fr>();
+        let mut transcript = PoseidonSponge::<Fr>::new(&poseidon_config);
 
         let u_i = CommittedInstance::<Projective> {
             cmE: Projective::rand(&mut rng),
@@ -665,17 +661,20 @@ pub mod tests {
         };
         let cmT = Projective::rand(&mut rng);
 
+        let pp_hash = Fr::from(42u32); // only for testing
+
         // compute the challenge natively
         let r_bits = ChallengeGadget::<Projective>::get_challenge_native(
-            &poseidon_config,
+            &mut transcript,
+            pp_hash,
             U_i.clone(),
             u_i.clone(),
             cmT,
-        )
-        .unwrap();
+        );
         let r = Fr::from_bigint(BigInteger::from_bits_le(&r_bits)).unwrap();
 
         let cs = ConstraintSystem::<Fr>::new_ref();
+        let pp_hashVar = FpVar::<Fr>::new_witness(cs.clone(), || Ok(pp_hash)).unwrap();
         let u_iVar =
             CommittedInstanceVar::<Projective>::new_witness(cs.clone(), || Ok(u_i.clone()))
                 .unwrap();
@@ -683,6 +682,7 @@ pub mod tests {
             CommittedInstanceVar::<Projective>::new_witness(cs.clone(), || Ok(U_i.clone()))
                 .unwrap();
         let cmTVar = NonNativeAffineVar::<Projective>::new_witness(cs.clone(), || Ok(cmT)).unwrap();
+        let mut transcriptVar = PoseidonSpongeVar::<Fr>::new(cs.clone(), &poseidon_config);
 
         // compute the challenge in-circuit
         let U_iVar_vec = [
@@ -693,8 +693,8 @@ pub mod tests {
         ]
         .concat();
         let r_bitsVar = ChallengeGadget::<Projective>::get_challenge_gadget(
-            cs.clone(),
-            &poseidon_config,
+            &mut transcriptVar,
+            pp_hashVar,
             U_iVar_vec,
             u_iVar,
             cmTVar,

@@ -1,15 +1,17 @@
-use ark_crypto_primitives::sponge::Absorb;
-use ark_ec::{CurveGroup, Group};
-use ark_std::{ Zero};
 use std::marker::PhantomData;
 use std::time::Instant;
 
-use super::{CommittedInstance, Witness};
-use crate::ccs::r1cs::R1CS;
+use ark_crypto_primitives::sponge::Absorb;
+use ark_ec::{CurveGroup, Group};
+use ark_std::Zero;
+
+use crate::arith::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
+use crate::Error;
 use crate::transcript::Transcript;
 use crate::utils::vec::{hadamard, mat_vec_mul, vec_add, vec_scalar_mul, vec_sub};
-use crate::Error;
+
+use super::{CommittedInstance, Witness};
 
 /// Implements the Non-Interactive Folding Scheme described in section 4 of
 /// [Nova](https://eprint.iacr.org/2021/370.pdf)
@@ -98,24 +100,23 @@ where
         w2: &Witness<C>,
         ci2: &CommittedInstance<C>,
     ) -> Result<(Vec<C::ScalarField>, C), Error> {
-        println!("Nova Point 0: nifs.compute_cmT - Starting ");
         let start = Instant::now();
-
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
 
-        println!("Nova Point 1 nifs.compute_cmT {:?} - Z concatenations", start.elapsed());
-
-
         // compute cross terms
-
+        let elapsed = start.elapsed();
+        println!("Time before computing T {:?}", elapsed);
         let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
-        println!("Nova Point 2 nifs.compute_cmT {:?} - Computed T", start.elapsed());
-
+        let elapsed = start.elapsed();
+        println!("Time after computing T {:?}", elapsed);
+        let elapsed = start.elapsed();
+        println!("Time before commiting T {:?}", elapsed);
 
         // use r_T=0 since we don't need hiding property for cm(T)
         let cmT = CS::commit(cs_prover_params, &T, &C::ScalarField::zero())?;
-        println!("Nova Point 3 nifs.compute_cmT {:?} - Committed T", start.elapsed());
+        let elapsed = start.elapsed();
+        println!("Time after commiting T {:?}", elapsed);
 
         Ok((T, cmT))
     }
@@ -196,7 +197,7 @@ where
     }
 
     pub fn prove_commitments(
-        tr: &mut impl Transcript<C>,
+        tr: &mut impl Transcript<C::ScalarField>,
         cs_prover_params: &CS::ProverParams,
         w: &Witness<C>,
         ci: &CommittedInstance<C>,
@@ -212,17 +213,21 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
+    use ark_crypto_primitives::sponge::{
+        CryptographicSponge,
+        poseidon::{PoseidonConfig, PoseidonSponge},
+    };
     use ark_ff::{BigInteger, PrimeField};
     use ark_pallas::{Fr, Projective};
     use ark_std::{ops::Mul, UniformRand};
 
-    use crate::ccs::r1cs::tests::{get_test_r1cs, get_test_z};
+    use crate::arith::r1cs::tests::{get_test_r1cs, get_test_z};
     use crate::commitment::pedersen::{Params as PedersenParams, Pedersen};
     use crate::folding::nova::circuits::ChallengeGadget;
     use crate::folding::nova::traits::NovaR1CS;
-    use crate::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
+    use crate::transcript::poseidon::poseidon_canonical_config;
+
+    use super::*;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn prepare_simple_fold_inputs<C>() -> (
@@ -271,14 +276,16 @@ pub mod tests {
                 .unwrap();
 
         let poseidon_config = poseidon_canonical_config::<C::ScalarField>();
+        let mut transcript = PoseidonSponge::<C::ScalarField>::new(&poseidon_config);
 
+        let pp_hash = C::ScalarField::from(42u32); // only for test
         let r_bits = ChallengeGadget::<C>::get_challenge_native(
-            &poseidon_config,
+            &mut transcript,
+            pp_hash,
             ci1.clone(),
             ci2.clone(),
             cmT,
-        )
-        .unwrap();
+        );
         let r_Fr = C::ScalarField::from_bigint(BigInteger::from_bits_le(&r_bits)).unwrap();
 
         let (w3, ci3) =
@@ -375,9 +382,9 @@ pub mod tests {
             .unwrap();
 
         // init Prover's transcript
-        let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
+        let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         // init Verifier's transcript
-        let mut transcript_v = PoseidonTranscript::<Projective>::new(&poseidon_config);
+        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
 
         // prove the ci3.cmE, ci3.cmW, cmT commitments
         let cm_proofs = NIFS::<Projective, Pedersen<Projective>>::prove_commitments(

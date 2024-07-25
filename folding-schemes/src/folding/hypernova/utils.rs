@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use super::lcccs::LCCCS;
 use super::nimfs::SigmasThetas;
-use crate::ccs::CCS;
+use crate::arith::ccs::CCS;
 use crate::utils::mle::dense_vec_to_dense_mle;
 use crate::utils::vec::mat_vec_mul;
 use crate::utils::virtual_polynomial::{build_eq_x_r_vec, eq_eval, VirtualPolynomial};
@@ -49,7 +49,7 @@ pub fn compute_sigmas_thetas<F: PrimeField>(
     Ok(SigmasThetas(sigmas, thetas))
 }
 
-/// computes c from the step 5 in section 5 of HyperNova, adapted to multiple LCCCS & CCCS
+/// Computes c from the step 5 in section 5 of HyperNova, adapted to multiple LCCCS & CCCS
 /// instances:
 /// $$
 /// c = \sum_{i \in [\mu]} \left(\sum_{j \in [t]} \gamma^{i \cdot t + j} \cdot e_i \cdot \sigma_{i,j} \right)
@@ -167,13 +167,15 @@ pub mod tests {
     use ark_std::Zero;
 
     use super::*;
-    use crate::ccs::tests::{get_test_ccs, get_test_z};
+    use crate::arith::{
+        ccs::tests::{get_test_ccs, get_test_z},
+        Arith,
+    };
     use crate::commitment::{pedersen::Pedersen, CommitmentScheme};
     use crate::folding::hypernova::lcccs::tests::compute_Ls;
     use crate::utils::hypercube::BooleanHypercube;
     use crate::utils::mle::matrix_to_dense_mle;
     use crate::utils::multilinear_polynomial::tests::fix_last_variables;
-    use crate::utils::virtual_polynomial::eq_eval;
 
     /// Given M(x,y) matrix and a random field element `r`, test that ~M(r,y) is is an s'-variable polynomial which
     /// compresses every column j of the M(x,y) matrix by performing a random linear combination between the elements
@@ -239,7 +241,9 @@ pub mod tests {
         // Initialize a multifolding object
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
-        let (lcccs_instance, _) = ccs.to_lcccs(&mut rng, &pedersen_params, &z1).unwrap();
+        let (lcccs_instance, _) = ccs
+            .to_lcccs::<_, _, Pedersen<Projective>>(&mut rng, &pedersen_params, &z1)
+            .unwrap();
 
         let sigmas_thetas =
             compute_sigmas_thetas(&ccs, &[z1.clone()], &[z2.clone()], &r_x_prime).unwrap();
@@ -287,7 +291,9 @@ pub mod tests {
         // Initialize a multifolding object
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
-        let (lcccs_instance, _) = ccs.to_lcccs(&mut rng, &pedersen_params, &z1).unwrap();
+        let (lcccs_instance, _) = ccs
+            .to_lcccs::<_, _, Pedersen<Projective>>(&mut rng, &pedersen_params, &z1)
+            .unwrap();
 
         // Compute g(x) with that r_x
         let g = compute_g::<Projective>(

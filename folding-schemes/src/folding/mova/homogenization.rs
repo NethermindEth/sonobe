@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
@@ -31,11 +32,11 @@ pub struct HomogeneousEvaluationClaim<C: CurveGroup> {
     pub rE_prime: Vec<C::ScalarField>,
 }
 
-pub trait Homogenization<C: CurveGroup, T: Transcript<C>> {
+pub trait Homogenization<C: CurveGroup, T: Transcript<C::ScalarField>> {
     type Proof: Clone + Debug;
 
     fn prove(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
@@ -43,7 +44,7 @@ pub trait Homogenization<C: CurveGroup, T: Transcript<C>> {
     ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error>;
 
     fn verify(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         proof: &Self::Proof,
@@ -55,12 +56,6 @@ pub trait Homogenization<C: CurveGroup, T: Transcript<C>> {
     >;
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct SumCheckHomogenization<C: CurveGroup, T: Transcript<C>> {
-    _phantom_C: std::marker::PhantomData<C>,
-    _phantom_T: std::marker::PhantomData<T>,
-}
-
 #[derive(Clone, Debug)]
 pub struct PointVsLineProof<C: CurveGroup> {
     pub h1: DensePolynomial<C::ScalarField>,
@@ -68,123 +63,19 @@ pub struct PointVsLineProof<C: CurveGroup> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PointVsLineHomogenization<C: CurveGroup, T: Transcript<C>> {
+pub struct PointVsLineHomogenization<C: CurveGroup, T: Transcript<C::ScalarField>> {
     _phantom_C: std::marker::PhantomData<C>,
     _phantom_T: std::marker::PhantomData<T>,
 }
 
-impl<C: CurveGroup, T: Transcript<C>> Homogenization<C, T> for SumCheckHomogenization<C, T>
-where
-    <C as Group>::ScalarField: Absorb,
-{
-    type Proof = SumCheckProof<C::ScalarField>;
-
-    fn prove(
-        transcript: &mut impl Transcript<C>,
-        ci1: &CommittedInstance<C>,
-        ci2: &CommittedInstance<C>,
-        w1: &Witness<C>,
-        w2: &Witness<C>,
-    ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error> {
-        let vars = log2(w1.E.len()) as usize;
-
-        let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
-        transcript.absorb(&beta_scalar);
-        let beta: C::ScalarField = transcript.get_challenge();
-
-        let g = compute_g(ci1, ci2, w1, w2, &beta)?;
-
-        let sumcheck_proof = IOPSumCheck::<C, T>::prove(&g, transcript)
-            .map_err(|err| Error::SumCheckProveError(err.to_string()))?;
-
-        let rE_prime = sumcheck_proof.point.clone();
-
-        let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
-        let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);
-
-        let mleE1_prime = mleE1.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
-        let mleE2_prime = mleE2.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
-
-        Ok((
-            sumcheck_proof,
-            HomogeneousEvaluationClaim {
-                mleE1_prime,
-                mleE2_prime,
-                rE_prime,
-            },
-        ))
-    }
-
-    fn verify(
-        transcript: &mut impl Transcript<C>,
-        ci1: &CommittedInstance<C>,
-        ci2: &CommittedInstance<C>,
-        proof: &Self::Proof,
-        mleE1_prime: &C::ScalarField,
-        mleE2_prime: &C::ScalarField,
-    ) -> Result<
-        Vec<<C>::ScalarField>, // rE=rE1'=rE2'
-        Error,
-    > {
-        let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
-        transcript.absorb(&beta_scalar);
-        let beta: C::ScalarField = transcript.get_challenge();
-
-        let vp_aux_info = VPAuxInfo::<C::ScalarField> {
-            max_degree: 2,
-            num_variables: ci1.rE.len(),
-            phantom: PhantomData::<C::ScalarField>,
-        };
-
-        // Step 3: Start verifying the sumcheck
-        // First, compute the expected sumcheck sum: \sum gamma^j v_j
-        let mut sum_evaluation_claims = ci1.mleE;
-
-        sum_evaluation_claims += beta * ci2.mleE;
-
-        // Verify the interactive part of the sumcheck
-        let sumcheck_subclaim =
-            IOPSumCheck::<C, T>::verify(sum_evaluation_claims, proof, &vp_aux_info, transcript)
-                .map_err(|err| Error::SumCheckVerifyError(err.to_string()))?;
-
-        let rE_prime = sumcheck_subclaim.point.clone();
-
-        let g = compute_c(
-            *mleE1_prime,
-            *mleE2_prime,
-            beta,
-            &ci1.rE,
-            &ci2.rE,
-            &rE_prime,
-        )?;
-
-        if g != sumcheck_subclaim.expected_evaluation {
-            return Err(Error::NotEqual);
-        }
-
-        let g_on_rxprime_from_sumcheck_last_eval = DensePolynomial::from_coefficients_slice(
-            &proof.proofs.last().ok_or(Error::Empty)?.coeffs,
-        )
-        .evaluate(rE_prime.last().ok_or(Error::Empty)?);
-        if g_on_rxprime_from_sumcheck_last_eval != g {
-            return Err(Error::NotEqual);
-        }
-        if g_on_rxprime_from_sumcheck_last_eval != sumcheck_subclaim.expected_evaluation {
-            return Err(Error::NotEqual);
-        }
-
-        Ok(rE_prime)
-    }
-}
-
-impl<C: CurveGroup, T: Transcript<C>> Homogenization<C, T> for PointVsLineHomogenization<C, T>
+impl<C: CurveGroup, T: Transcript<C::ScalarField>> Homogenization<C, T> for PointVsLineHomogenization<C, T>
 where
     <C as Group>::ScalarField: Absorb,
 {
     type Proof = PointVsLineProof<C>;
 
     fn prove(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
@@ -194,19 +85,29 @@ where
 
         let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
         let mleE2 = dense_vec_to_dense_mle(vars, &w2.E);
+        let start = Instant::now();
+        let elapsed = start.elapsed();
+        println!("Time before computing h {:?}", elapsed);
 
         let h1 = compute_h(&mleE1, &ci1.rE, &ci2.rE)?;
         let h2 = compute_h(&mleE2, &ci1.rE, &ci2.rE)?;
 
-        transcript.absorb_vec(h1.coeffs());
-        transcript.absorb_vec(h2.coeffs());
+        let elapsed = start.elapsed();
+        println!("Time after computing h1 h2 {:?}", elapsed);
+
+        transcript.absorb(&h1.coeffs());
+        transcript.absorb(&h2.coeffs());
 
         let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
         transcript.absorb(&beta_scalar);
         let beta = transcript.get_challenge();
 
+        let elapsed = start.elapsed();
+        println!("Time before evaluating h {:?}", elapsed);
         let mleE1_prime = h1.evaluate(&beta);
         let mleE2_prime = h2.evaluate(&beta);
+        let elapsed = start.elapsed();
+        println!("Time after evaluating h {:?}", elapsed);
 
         let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
 
@@ -221,7 +122,7 @@ where
     }
 
     fn verify(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         proof: &Self::Proof,
@@ -239,8 +140,8 @@ where
             return Err(Error::NotEqual);
         }
 
-        transcript.absorb_vec(proof.h1.coeffs());
-        transcript.absorb_vec(proof.h2.coeffs());
+        transcript.absorb(&proof.h1.coeffs());
+        transcript.absorb(&proof.h2.coeffs());
 
         let beta_scalar = C::ScalarField::from_le_bytes_mod_order(b"beta");
         transcript.absorb(&beta_scalar);

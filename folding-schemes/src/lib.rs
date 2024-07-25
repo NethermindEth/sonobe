@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
-#![allow(clippy::upper_case_acronyms)]
 
 use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_ff::PrimeField;
@@ -11,7 +10,7 @@ use thiserror::Error;
 
 use crate::frontend::FCircuit;
 
-pub mod ccs;
+pub mod arith;
 pub mod commitment;
 pub mod constants;
 pub mod folding;
@@ -70,6 +69,8 @@ pub enum Error {
     NotEnoughSteps,
     #[error("Evaluation failed")]
     EvaluationFail,
+    #[error("{0} can not be zero")]
+    CantBeZero(String),
 
     // Commitment errors
     #[error("Pedersen parameters length is not sufficient (generators.len={0} < vector.len={1} unsatisfied)")]
@@ -92,10 +93,16 @@ pub enum Error {
     NotSupported(String),
     #[error("max i-th step reached (usize limit reached)")]
     MaxStep,
-    #[error("Circom Witness calculation error: {0}")]
+    #[error("Witness calculation error: {0}")]
     WitnessCalculationError(String),
     #[error("BigInt to PrimeField conversion error: {0}")]
     BigIntConversionError(String),
+    #[error("Failed to serde: {0}")]
+    JSONSerdeError(String),
+    #[error("Multi instances folding not supported in this scheme")]
+    NoMultiInstances,
+    #[error("Missing 'other' instances, since this is a multi-instances folding scheme")]
+    MissingOtherInstances,
 }
 
 /// FoldingScheme defines trait that is implemented by the diverse folding schemes. It is defined
@@ -110,23 +117,31 @@ where
     C2::BaseField: PrimeField,
     FC: FCircuit<C1::ScalarField>,
 {
-    type PreprocessorParam: Debug;
-    type ProverParam: Debug;
-    type VerifierParam: Debug;
-    type CommittedInstanceWithWitness: Debug;
-    type CFCommittedInstanceWithWitness: Debug; // CycleFold CommittedInstance & Witness
+    type PreprocessorParam: Debug + Clone;
+    type ProverParam: Debug + Clone;
+    type VerifierParam: Debug + Clone;
+    type RunningInstance: Debug; // contains the CommittedInstance + Witness
+    type IncomingInstance: Debug; // contains the CommittedInstance + Witness
+    type MultiCommittedInstanceWithWitness: Debug; // type used for the extra instances in the multi-instance folding setting
+    type CFInstance: Debug; // CycleFold CommittedInstance & Witness
 
     fn preprocess(
+        rng: impl RngCore,
         prep_param: &Self::PreprocessorParam,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
     fn init(
-        pp: &Self::ProverParam,
+        params: &(Self::ProverParam, Self::VerifierParam),
         step_circuit: FC,
         z_0: Vec<C1::ScalarField>, // initial state
     ) -> Result<Self, Error>;
 
-    fn prove_step(&mut self, external_inputs: Vec<C1::ScalarField>) -> Result<(), Error>;
+    fn prove_step(
+        &mut self,
+        rng: impl RngCore,
+        external_inputs: Vec<C1::ScalarField>,
+        other_instances: Option<Self::MultiCommittedInstanceWithWitness>,
+    ) -> Result<(), Error>;
 
     // returns the state at the current step
     fn state(&self) -> Vec<C1::ScalarField>;
@@ -136,9 +151,9 @@ where
     fn instances(
         &self,
     ) -> (
-        Self::CommittedInstanceWithWitness,
-        Self::CommittedInstanceWithWitness,
-        Self::CFCommittedInstanceWithWitness,
+        Self::RunningInstance,
+        Self::IncomingInstance,
+        Self::CFInstance,
     );
 
     fn verify(
@@ -147,10 +162,39 @@ where
         z_i: Vec<C1::ScalarField>, // last state
         // number of steps between the initial state and the last state
         num_steps: C1::ScalarField,
-        running_instance: Self::CommittedInstanceWithWitness,
-        incoming_instance: Self::CommittedInstanceWithWitness,
-        cyclefold_instance: Self::CFCommittedInstanceWithWitness,
+        running_instance: Self::RunningInstance,
+        incoming_instance: Self::IncomingInstance,
+        cyclefold_instance: Self::CFInstance,
     ) -> Result<(), Error>;
+}
+
+/// Trait with auxiliary methods for multi-folding schemes (ie. HyperNova, ProtoGalaxy, etc),
+/// allowing to create new instances for the multifold.
+pub trait MultiFolding<C1: CurveGroup, C2: CurveGroup, FC>: Clone + Debug
+where
+    C1: CurveGroup<BaseField = C2::ScalarField, ScalarField = C2::BaseField>,
+    C2::BaseField: PrimeField,
+    FC: FCircuit<C1::ScalarField>,
+{
+    type RunningInstance: Debug;
+    type IncomingInstance: Debug;
+    type MultiInstance: Debug;
+
+    /// Creates a new RunningInstance for the given state, to be folded in the multi-folding step.
+    fn new_running_instance(
+        &self,
+        rng: impl RngCore,
+        state: Vec<C1::ScalarField>,
+        external_inputs: Vec<C1::ScalarField>,
+    ) -> Result<Self::RunningInstance, Error>;
+
+    /// Creates a new IncomingInstance for the given state, to be folded in the multi-folding step.
+    fn new_incoming_instance(
+        &self,
+        rng: impl RngCore,
+        state: Vec<C1::ScalarField>,
+        external_inputs: Vec<C1::ScalarField>,
+    ) -> Result<Self::IncomingInstance, Error>;
 }
 
 pub trait Decider<
@@ -162,16 +206,22 @@ pub trait Decider<
     C1: CurveGroup<BaseField = C2::ScalarField, ScalarField = C2::BaseField>,
     C2::BaseField: PrimeField,
 {
+    type PreprocessorParam: Debug;
     type ProverParam: Clone;
     type Proof;
     type VerifierParam;
     type PublicInput: Debug;
-    type CommittedInstanceWithWitness: Debug;
     type CommittedInstance: Clone + Debug;
 
-    fn prove(
-        pp: Self::ProverParam,
+    fn preprocess(
         rng: impl RngCore + CryptoRng,
+        prep_param: &Self::PreprocessorParam,
+        fs: FS,
+    ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
+
+    fn prove(
+        rng: impl RngCore + CryptoRng,
+        pp: Self::ProverParam,
         folding_scheme: FS,
     ) -> Result<Self::Proof, Error>;
 

@@ -1,47 +1,45 @@
 /// Implements the scheme described in [Nova](https://eprint.iacr.org/2021/370.pdf) and
 /// [CycleFold](https://eprint.iacr.org/2023/1192.pdf).
-use ark_crypto_primitives::{
-    crh::{poseidon::CRH, CRHScheme},
-    sponge::{poseidon::PoseidonConfig, Absorb},
+use ark_crypto_primitives::sponge::{
+    poseidon::{PoseidonConfig, PoseidonSponge},
+    Absorb, CryptographicSponge,
 };
 use ark_ec::{AffineRepr, CurveGroup, Group};
-use ark_ff::{BigInteger, Field, PrimeField, ToConstraintField};
+use ark_ff::{BigInteger, PrimeField};
 use ark_r1cs_std::{groups::GroupOpsBounds, prelude::CurveVar, ToConstraintFieldGadget};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::fmt::Debug;
+use ark_std::rand::RngCore;
 use ark_std::{One, Zero};
 use core::marker::PhantomData;
-use std::usize;
 
-use crate::ccs::r1cs::{extract_r1cs, extract_w_x, R1CS};
 use crate::commitment::CommitmentScheme;
-use crate::folding::circuits::{
-    nonnative::{
-        affine::nonnative_affine_to_field_elements, uint::nonnative_field_to_field_elements,
-    },
-    CF2,
-};
+use crate::folding::circuits::cyclefold::{fold_cyclefold_circuit, CycleFoldCircuit};
+use crate::folding::circuits::CF2;
 use crate::frontend::FCircuit;
+use crate::transcript::{AbsorbNonNative, Transcript};
 use crate::utils::vec::is_zero_vec;
 use crate::Error;
 use crate::FoldingScheme;
+use crate::{
+    arith::r1cs::{extract_r1cs, extract_w_x, R1CS},
+    utils::{get_cm_coordinates, pp_hash},
+};
 
 pub mod circuits;
-pub mod cyclefold;
 pub mod decider_eth;
 pub mod decider_eth_circuit;
 pub mod nifs;
 pub mod serialize;
 pub mod traits;
-
 use circuits::{AugmentedFCircuit, ChallengeGadget};
-use cyclefold::{CycleFoldChallengeGadget, CycleFoldCircuit};
 use nifs::NIFS;
 use traits::NovaR1CS;
 
-#[cfg(test)]
-use cyclefold::CF_IO_LEN;
+/// Number of points to be folded in the CycleFold circuit, in Nova's case, this is a fixed amount:
+/// 2 points to be folded.
+const NOVA_CF_N_POINTS: usize = 2_usize;
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct CommittedInstance<C: CurveGroup> {
@@ -62,6 +60,54 @@ impl<C: CurveGroup> CommittedInstance<C> {
     }
 }
 
+impl<C: CurveGroup> Absorb for CommittedInstance<C>
+where
+    C::ScalarField: Absorb,
+{
+    fn to_sponge_bytes(&self, _dest: &mut Vec<u8>) {
+        // This is never called
+        unimplemented!()
+    }
+
+    fn to_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
+        self.u.to_sponge_field_elements(dest);
+        self.x.to_sponge_field_elements(dest);
+        // We cannot call `to_native_sponge_field_elements(dest)` directly, as
+        // `to_native_sponge_field_elements` needs `F` to be `C::ScalarField`,
+        // but here `F` is a generic `PrimeField`.
+        self.cmE
+            .to_native_sponge_field_elements_as_vec()
+            .to_sponge_field_elements(dest);
+        self.cmW
+            .to_native_sponge_field_elements_as_vec()
+            .to_sponge_field_elements(dest);
+    }
+}
+
+impl<C: CurveGroup> AbsorbNonNative<C::BaseField> for CommittedInstance<C>
+where
+    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField + Absorb,
+{
+    // Compatible with the in-circuit `CycleFoldCommittedInstanceVar::to_native_sponge_field_elements`
+    // in `cyclefold.rs`.
+    fn to_native_sponge_field_elements(&self, dest: &mut Vec<C::BaseField>) {
+        [self.u].to_native_sponge_field_elements(dest);
+        self.x.to_native_sponge_field_elements(dest);
+        let (cmE_x, cmE_y) = match self.cmE.into_affine().xy() {
+            Some((&x, &y)) => (x, y),
+            None => (C::BaseField::zero(), C::BaseField::zero()),
+        };
+        let (cmW_x, cmW_y) = match self.cmW.into_affine().xy() {
+            Some((&x, &y)) => (x, y),
+            None => (C::BaseField::zero(), C::BaseField::zero()),
+        };
+        cmE_x.to_sponge_field_elements(dest);
+        cmE_y.to_sponge_field_elements(dest);
+        cmW_x.to_sponge_field_elements(dest);
+        cmW_y.to_sponge_field_elements(dest);
+    }
+}
+
 impl<C: CurveGroup> CommittedInstance<C>
 where
     <C as Group>::ScalarField: Absorb,
@@ -71,66 +117,21 @@ where
     /// nova/circuits.rs::CommittedInstanceVar.hash.
     /// Returns `H(i, z_0, z_i, U_i)`, where `i` can be `i` but also `i+1`, and `U_i` is the
     /// `CommittedInstance`.
-    pub fn hash(
+    pub fn hash<T: Transcript<C::ScalarField>>(
         &self,
-        poseidon_config: &PoseidonConfig<C::ScalarField>,
+        sponge: &T,
+        pp_hash: C::ScalarField, // public params hash
         i: C::ScalarField,
         z_0: Vec<C::ScalarField>,
         z_i: Vec<C::ScalarField>,
-    ) -> Result<C::ScalarField, Error> {
-        let (cmE_x, cmE_y) = nonnative_affine_to_field_elements::<C>(self.cmE)?;
-        let (cmW_x, cmW_y) = nonnative_affine_to_field_elements::<C>(self.cmW)?;
-
-        CRH::<C::ScalarField>::evaluate(
-            poseidon_config,
-            vec![
-                vec![i],
-                z_0,
-                z_i,
-                vec![self.u],
-                self.x.clone(),
-                cmE_x,
-                cmE_y,
-                cmW_x,
-                cmW_y,
-            ]
-            .concat(),
-        )
-        .map_err(|e| Error::Other(e.to_string()))
-    }
-}
-
-impl<C: CurveGroup> ToConstraintField<C::BaseField> for CommittedInstance<C>
-where
-    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField + Absorb,
-{
-    fn to_field_elements(&self) -> Option<Vec<C::BaseField>> {
-        let u = nonnative_field_to_field_elements(&self.u);
-        let x = self
-            .x
-            .iter()
-            .flat_map(nonnative_field_to_field_elements)
-            .collect::<Vec<_>>();
-        let (cmE_x, cmE_y, cmE_is_inf) = match self.cmE.into_affine().xy() {
-            Some((&x, &y)) => (x, y, C::BaseField::zero()),
-            None => (
-                C::BaseField::zero(),
-                C::BaseField::zero(),
-                C::BaseField::one(),
-            ),
-        };
-        let (cmW_x, cmW_y, cmW_is_inf) = match self.cmW.into_affine().xy() {
-            Some((&x, &y)) => (x, y, C::BaseField::zero()),
-            None => (
-                C::BaseField::zero(),
-                C::BaseField::zero(),
-                C::BaseField::one(),
-            ),
-        };
-        // Concatenate `cmE_is_inf` and `cmW_is_inf` to save constraints for CRHGadget::evaluate in the corresponding circuit
-        let is_inf = cmE_is_inf.double() + cmW_is_inf;
-
-        Some([u, x, vec![cmE_x, cmE_y, cmW_x, cmW_y, is_inf]].concat())
+    ) -> C::ScalarField {
+        let mut sponge = sponge.clone();
+        sponge.absorb(&pp_hash);
+        sponge.absorb(&i);
+        sponge.absorb(&z_0);
+        sponge.absorb(&z_i);
+        sponge.absorb(&self);
+        sponge.squeeze_field_elements(1)[0]
     }
 }
 
@@ -141,12 +142,15 @@ where
     /// hash_cyclefold implements the committed instance hash compatible with the gadget implemented in
     /// nova/cyclefold.rs::CycleFoldCommittedInstanceVar.hash.
     /// Returns `H(U_i)`, where `U_i` is the `CommittedInstance` for CycleFold.
-    pub fn hash_cyclefold(
+    pub fn hash_cyclefold<T: Transcript<C::BaseField>>(
         &self,
-        poseidon_config: &PoseidonConfig<C::BaseField>,
-    ) -> Result<C::BaseField, Error> {
-        CRH::<C::BaseField>::evaluate(poseidon_config, self.to_field_elements().unwrap())
-            .map_err(|e| Error::Other(e.to_string()))
+        sponge: &T,
+        pp_hash: C::BaseField, // public params hash
+    ) -> C::BaseField {
+        let mut sponge = sponge.clone();
+        sponge.absorb(&pp_hash);
+        sponge.absorb_nonnative(self);
+        sponge.squeeze_field_elements(1)[0]
     }
 }
 
@@ -192,6 +196,44 @@ where
 }
 
 #[derive(Debug, Clone)]
+pub struct PreprocessorParam<C1, C2, FC, CS1, CS2>
+where
+    C1: CurveGroup,
+    C2: CurveGroup,
+    FC: FCircuit<C1::ScalarField>,
+    CS1: CommitmentScheme<C1>,
+    CS2: CommitmentScheme<C2>,
+{
+    pub poseidon_config: PoseidonConfig<C1::ScalarField>,
+    pub F: FC,
+    // cs params if not provided, will be generated at the preprocess method
+    pub cs_pp: Option<CS1::ProverParams>,
+    pub cs_vp: Option<CS1::VerifierParams>,
+    pub cf_cs_pp: Option<CS2::ProverParams>,
+    pub cf_cs_vp: Option<CS2::VerifierParams>,
+}
+
+impl<C1, C2, FC, CS1, CS2> PreprocessorParam<C1, C2, FC, CS1, CS2>
+where
+    C1: CurveGroup,
+    C2: CurveGroup,
+    FC: FCircuit<C1::ScalarField>,
+    CS1: CommitmentScheme<C1>,
+    CS2: CommitmentScheme<C2>,
+{
+    pub fn new(poseidon_config: PoseidonConfig<C1::ScalarField>, F: FC) -> Self {
+        Self {
+            poseidon_config,
+            F,
+            cs_pp: None,
+            cs_vp: None,
+            cf_cs_pp: None,
+            cf_cs_vp: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ProverParams<C1, C2, CS1, CS2>
 where
     C1: CurveGroup,
@@ -200,15 +242,42 @@ where
     CS2: CommitmentScheme<C2>,
 {
     pub poseidon_config: PoseidonConfig<C1::ScalarField>,
-    pub cs_params: CS1::ProverParams,
-    pub cf_cs_params: CS2::ProverParams,
+    pub cs_pp: CS1::ProverParams,
+    pub cf_cs_pp: CS2::ProverParams,
 }
 
 #[derive(Debug, Clone)]
-pub struct VerifierParams<C1: CurveGroup, C2: CurveGroup> {
+pub struct VerifierParams<C1, C2, CS1, CS2>
+where
+    C1: CurveGroup,
+    C2: CurveGroup,
+    CS1: CommitmentScheme<C1>,
+    CS2: CommitmentScheme<C2>,
+{
     pub poseidon_config: PoseidonConfig<C1::ScalarField>,
     pub r1cs: R1CS<C1::ScalarField>,
     pub cf_r1cs: R1CS<C2::ScalarField>,
+    pub cs_vp: CS1::VerifierParams,
+    pub cf_cs_vp: CS2::VerifierParams,
+}
+
+impl<C1, C2, CS1, CS2> VerifierParams<C1, C2, CS1, CS2>
+where
+    C1: CurveGroup,
+    C2: CurveGroup,
+    CS1: CommitmentScheme<C1>,
+    CS2: CommitmentScheme<C2>,
+{
+    /// returns the hash of the public parameters of Nova
+    pub fn pp_hash(&self) -> Result<C1::ScalarField, Error> {
+        pp_hash::<C1, C2, CS1, CS2>(
+            &self.r1cs,
+            &self.cf_r1cs,
+            &self.cs_vp,
+            &self.cf_cs_vp,
+            &self.poseidon_config,
+        )
+    }
 }
 
 /// Implements Nova+CycleFold's IVC, described in [Nova](https://eprint.iacr.org/2021/370.pdf) and
@@ -233,11 +302,13 @@ where
     pub cf_r1cs: R1CS<C2::ScalarField>,
     pub poseidon_config: PoseidonConfig<C1::ScalarField>,
     /// CommitmentScheme::ProverParams over C1
-    pub cs_params: CS1::ProverParams,
+    pub cs_pp: CS1::ProverParams,
     /// CycleFold CommitmentScheme::ProverParams, over C2
-    pub cf_cs_params: CS2::ProverParams,
+    pub cf_cs_pp: CS2::ProverParams,
     /// F circuit, the circuit that is being folded
     pub F: FC,
+    /// public params hash
+    pub pp_hash: C1::ScalarField,
     pub i: C1::ScalarField,
     /// initial state
     pub z_0: Vec<C1::ScalarField>,
@@ -272,37 +343,71 @@ where
     for<'a> &'a GC1: GroupOpsBounds<'a, C1, GC1>,
     for<'a> &'a GC2: GroupOpsBounds<'a, C2, GC2>,
 {
-    type PreprocessorParam = (Self::ProverParam, FC);
+    type PreprocessorParam = PreprocessorParam<C1, C2, FC, CS1, CS2>;
     type ProverParam = ProverParams<C1, C2, CS1, CS2>;
-    type VerifierParam = VerifierParams<C1, C2>;
-    type CommittedInstanceWithWitness = (CommittedInstance<C1>, Witness<C1>);
-    type CFCommittedInstanceWithWitness = (CommittedInstance<C2>, Witness<C2>);
+    type VerifierParam = VerifierParams<C1, C2, CS1, CS2>;
+    type RunningInstance = (CommittedInstance<C1>, Witness<C1>);
+    type IncomingInstance = (CommittedInstance<C1>, Witness<C1>);
+    type MultiCommittedInstanceWithWitness = ();
+    type CFInstance = (CommittedInstance<C2>, Witness<C2>);
 
     fn preprocess(
+        mut rng: impl RngCore,
         prep_param: &Self::PreprocessorParam,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error> {
-        let (prover_params, F_circuit) = prep_param;
-
         let (r1cs, cf_r1cs) =
-            get_r1cs::<C1, GC1, C2, GC2, FC>(&prover_params.poseidon_config, F_circuit.clone())?;
+            get_r1cs::<C1, GC1, C2, GC2, FC>(&prep_param.poseidon_config, prep_param.F.clone())?;
 
-        let verifier_params = VerifierParams::<C1, C2> {
-            poseidon_config: prover_params.poseidon_config.clone(),
+        // if cs params exist, use them, if not, generate new ones
+        let cs_pp: CS1::ProverParams;
+        let cs_vp: CS1::VerifierParams;
+        let cf_cs_pp: CS2::ProverParams;
+        let cf_cs_vp: CS2::VerifierParams;
+        if prep_param.cs_pp.is_some()
+            && prep_param.cf_cs_pp.is_some()
+            && prep_param.cs_vp.is_some()
+            && prep_param.cf_cs_vp.is_some()
+        {
+            cs_pp = prep_param.clone().cs_pp.unwrap();
+            cs_vp = prep_param.clone().cs_vp.unwrap();
+            cf_cs_pp = prep_param.clone().cf_cs_pp.unwrap();
+            cf_cs_vp = prep_param.clone().cf_cs_vp.unwrap();
+        } else {
+            (cs_pp, cs_vp) = CS1::setup(&mut rng, r1cs.A.n_rows)?;
+            (cf_cs_pp, cf_cs_vp) = CS2::setup(&mut rng, cf_r1cs.A.n_rows)?;
+        }
+
+        let prover_params = ProverParams::<C1, C2, CS1, CS2> {
+            poseidon_config: prep_param.poseidon_config.clone(),
+            cs_pp: cs_pp.clone(),
+            cf_cs_pp: cf_cs_pp.clone(),
+        };
+        let verifier_params = VerifierParams::<C1, C2, CS1, CS2> {
+            poseidon_config: prep_param.poseidon_config.clone(),
             r1cs,
             cf_r1cs,
+            cs_vp,
+            cf_cs_vp,
         };
-        Ok((prover_params.clone(), verifier_params))
+
+        Ok((prover_params, verifier_params))
     }
 
     /// Initializes the Nova+CycleFold's IVC for the given parameters and initial state `z_0`.
-    fn init(pp: &Self::ProverParam, F: FC, z_0: Vec<C1::ScalarField>) -> Result<Self, Error> {
+    fn init(
+        params: &(Self::ProverParam, Self::VerifierParam),
+        F: FC,
+        z_0: Vec<C1::ScalarField>,
+    ) -> Result<Self, Error> {
+        let (pp, vp) = params;
+
         // prepare the circuit to obtain its R1CS
         let cs = ConstraintSystem::<C1::ScalarField>::new_ref();
         let cs2 = ConstraintSystem::<C1::BaseField>::new_ref();
 
         let augmented_F_circuit =
             AugmentedFCircuit::<C1, C2, GC2, FC>::empty(&pp.poseidon_config, F.clone());
-        let cf_circuit = CycleFoldCircuit::<C1, GC1>::empty();
+        let cf_circuit = CycleFoldCircuit::<C1, GC1>::empty(NOVA_CF_N_POINTS);
 
         augmented_F_circuit.generate_constraints(cs.clone())?;
         cs.finalize();
@@ -313,6 +418,9 @@ where
         cs2.finalize();
         let cs2 = cs2.into_inner().ok_or(Error::NoInnerConstraintSystem)?;
         let cf_r1cs = extract_r1cs::<C1::BaseField>(&cs2);
+
+        // compute the public params hash
+        let pp_hash = vp.pp_hash()?;
 
         // setup the dummy instances
         let (w_dummy, u_dummy) = r1cs.dummy_instance();
@@ -327,9 +435,10 @@ where
             r1cs,
             cf_r1cs,
             poseidon_config: pp.poseidon_config.clone(),
-            cs_params: pp.cs_params.clone(),
-            cf_cs_params: pp.cf_cs_params.clone(),
+            cs_pp: pp.cs_pp.clone(),
+            cf_cs_pp: pp.cf_cs_pp.clone(),
             F,
+            pp_hash,
             i: C1::ScalarField::zero(),
             z_0: z_0.clone(),
             z_i: z_0,
@@ -344,8 +453,24 @@ where
     }
 
     /// Implements IVC.P of Nova+CycleFold
-    fn prove_step(&mut self, external_inputs: Vec<C1::ScalarField>) -> Result<(), Error> {
+    fn prove_step(
+        &mut self,
+        _rng: impl RngCore,
+        external_inputs: Vec<C1::ScalarField>,
+        // Nova does not support multi-instances folding
+        _other_instances: Option<Self::MultiCommittedInstanceWithWitness>,
+    ) -> Result<(), Error> {
+        // `sponge` is for digest computation.
+        let sponge = PoseidonSponge::<C1::ScalarField>::new(&self.poseidon_config);
+        // `transcript` is for challenge generation.
+        let mut transcript = sponge.clone();
+
         let augmented_F_circuit: AugmentedFCircuit<C1, C2, GC2, FC>;
+
+        // Nova does not support (by design) multi-instances folding
+        if _other_instances.is_some() {
+            return Err(Error::NoMultiInstances);
+        }
 
         if self.z_i.len() != self.F.state_len() {
             return Err(Error::NotSameLength(
@@ -380,11 +505,12 @@ where
 
         // r_bits is the r used to the RLC of the F' instances
         let r_bits = ChallengeGadget::<C1>::get_challenge_native(
-            &self.poseidon_config,
+            &mut transcript,
+            self.pp_hash,
             self.U_i.clone(),
             self.u_i.clone(),
             cmT,
-        )?;
+        );
         let r_Fr = C1::ScalarField::from_bigint(BigInteger::from_bits_le(&r_bits))
             .ok_or(Error::OutOfBounds)?;
         let r_Fq = C1::BaseField::from_bigint(BigInteger::from_bits_le(&r_bits))
@@ -398,20 +524,22 @@ where
         // folded instance output (public input, x)
         // u_{i+1}.x[0] = H(i+1, z_0, z_{i+1}, U_{i+1})
         let u_i1_x = U_i1.hash(
-            &self.poseidon_config,
+            &sponge,
+            self.pp_hash,
             self.i + C1::ScalarField::one(),
             self.z_0.clone(),
             z_i1.clone(),
-        )?;
+        );
         // u_{i+1}.x[1] = H(cf_U_{i+1})
         let cf_u_i1_x: C1::ScalarField;
 
         if self.i == C1::ScalarField::zero() {
-            cf_u_i1_x = self.cf_U_i.hash_cyclefold(&self.poseidon_config)?;
+            cf_u_i1_x = self.cf_U_i.hash_cyclefold(&sponge, self.pp_hash);
             // base case
             augmented_F_circuit = AugmentedFCircuit::<C1, C2, GC2, FC> {
                 _gc2: PhantomData,
                 poseidon_config: self.poseidon_config.clone(),
+                pp_hash: Some(self.pp_hash),
                 i: Some(C1::ScalarField::zero()), // = i=0
                 i_usize: Some(0),
                 z_0: Some(self.z_0.clone()), // = z_i
@@ -456,35 +584,42 @@ where
 
             let cfW_circuit = CycleFoldCircuit::<C1, GC1> {
                 _gc: PhantomData,
-                r_bits: Some(r_bits.clone()),
-                p1: Some(self.U_i.clone().cmW),
-                p2: Some(self.u_i.clone().cmW),
+                n_points: NOVA_CF_N_POINTS,
+                r_bits: Some(vec![r_bits.clone()]),
+                points: Some(vec![self.U_i.clone().cmW, self.u_i.clone().cmW]),
                 x: Some(cfW_u_i_x.clone()),
             };
             let cfE_circuit = CycleFoldCircuit::<C1, GC1> {
                 _gc: PhantomData,
-                r_bits: Some(r_bits.clone()),
-                p1: Some(self.U_i.clone().cmE),
-                p2: Some(cmT),
+                n_points: NOVA_CF_N_POINTS,
+                r_bits: Some(vec![r_bits.clone()]),
+                points: Some(vec![self.U_i.clone().cmE, cmT]),
                 x: Some(cfE_u_i_x.clone()),
             };
 
             // fold self.cf_U_i + cfW_U -> folded running with cfW
             let (_cfW_w_i, cfW_u_i, cfW_W_i1, cfW_U_i1, cfW_cmT, _) = self.fold_cyclefold_circuit(
+                &mut transcript,
                 self.cf_W_i.clone(), // CycleFold running instance witness
                 self.cf_U_i.clone(), // CycleFold running instance
                 cfW_u_i_x,
                 cfW_circuit,
             )?;
             // fold [the output from folding self.cf_U_i + cfW_U] + cfE_U = folded_running_with_cfW + cfE
-            let (_cfE_w_i, cfE_u_i, cf_W_i1, cf_U_i1, cf_cmT, _) =
-                self.fold_cyclefold_circuit(cfW_W_i1, cfW_U_i1.clone(), cfE_u_i_x, cfE_circuit)?;
+            let (_cfE_w_i, cfE_u_i, cf_W_i1, cf_U_i1, cf_cmT, _) = self.fold_cyclefold_circuit(
+                &mut transcript,
+                cfW_W_i1,
+                cfW_U_i1.clone(),
+                cfE_u_i_x,
+                cfE_circuit,
+            )?;
 
-            cf_u_i1_x = cf_U_i1.hash_cyclefold(&self.poseidon_config)?;
+            cf_u_i1_x = cf_U_i1.hash_cyclefold(&sponge, self.pp_hash);
 
             augmented_F_circuit = AugmentedFCircuit::<C1, C2, GC2, FC> {
                 _gc2: PhantomData,
                 poseidon_config: self.poseidon_config.clone(),
+                pp_hash: Some(self.pp_hash),
                 i: Some(self.i),
                 i_usize: Some(i_usize),
                 z_0: Some(self.z_0.clone()),
@@ -540,7 +675,7 @@ where
         self.i += C1::ScalarField::one();
         self.z_i = z_i1;
         self.w_i = Witness::<C1>::new(w_i1, self.r1cs.A.n_rows);
-        self.u_i = self.w_i.commit::<CS1>(&self.cs_params, x_i1)?;
+        self.u_i = self.w_i.commit::<CS1>(&self.cs_pp, x_i1)?;
         self.W_i = W_i1;
         self.U_i = U_i1;
 
@@ -557,12 +692,13 @@ where
     fn state(&self) -> Vec<C1::ScalarField> {
         self.z_i.clone()
     }
+
     fn instances(
         &self,
     ) -> (
-        Self::CommittedInstanceWithWitness,
-        Self::CommittedInstanceWithWitness,
-        Self::CFCommittedInstanceWithWitness,
+        Self::RunningInstance,
+        Self::IncomingInstance,
+        Self::CFInstance,
     ) {
         (
             (self.U_i.clone(), self.W_i.clone()),
@@ -571,16 +707,26 @@ where
         )
     }
 
-    /// Implements IVC.V of Nova+CycleFold
+    /// Implements IVC.V of Nova+CycleFold. Notice that this method does not include the
+    /// commitments verification, which is done in the Decider.
     fn verify(
         vp: Self::VerifierParam,
         z_0: Vec<C1::ScalarField>, // initial state
         z_i: Vec<C1::ScalarField>, // last state
         num_steps: C1::ScalarField,
-        running_instance: Self::CommittedInstanceWithWitness,
-        incoming_instance: Self::CommittedInstanceWithWitness,
-        cyclefold_instance: Self::CFCommittedInstanceWithWitness,
+        running_instance: Self::RunningInstance,
+        incoming_instance: Self::IncomingInstance,
+        cyclefold_instance: Self::CFInstance,
     ) -> Result<(), Error> {
+        let sponge = PoseidonSponge::<C1::ScalarField>::new(&vp.poseidon_config);
+
+        if num_steps == C1::ScalarField::zero() {
+            if z_0 != z_i {
+                return Err(Error::IVCVerificationFail);
+            }
+            return Ok(());
+        }
+
         let (U_i, W_i) = running_instance;
         let (u_i, w_i) = incoming_instance;
         let (cf_U_i, cf_W_i) = cyclefold_instance;
@@ -589,14 +735,16 @@ where
             return Err(Error::IVCVerificationFail);
         }
 
+        let pp_hash = vp.pp_hash()?;
+
         // check that u_i's output points to the running instance
         // u_i.X[0] == H(i, z_0, z_i, U_i)
-        let expected_u_i_x = U_i.hash(&vp.poseidon_config, num_steps, z_0, z_i.clone())?;
+        let expected_u_i_x = U_i.hash(&sponge, pp_hash, num_steps, z_0, z_i.clone());
         if expected_u_i_x != u_i.x[0] {
             return Err(Error::IVCVerificationFail);
         }
         // u_i.X[1] == H(cf_U_i)
-        let expected_cf_u_i_x = cf_U_i.hash_cyclefold(&vp.poseidon_config)?;
+        let expected_cf_u_i_x = cf_U_i.hash_cyclefold(&sponge, pp_hash);
         if expected_cf_u_i_x != u_i.x[1] {
             return Err(Error::IVCVerificationFail);
         }
@@ -636,29 +784,12 @@ where
     // computes T and cmT for the AugmentedFCircuit
     fn compute_cmT(&self) -> Result<(Vec<C1::ScalarField>, C1), Error> {
         NIFS::<C1, CS1>::compute_cmT(
-            &self.cs_params,
+            &self.cs_pp,
             &self.r1cs,
             &self.w_i,
             &self.u_i,
             &self.W_i,
             &self.U_i,
-        )
-    }
-    // computes T* and cmT* for the CycleFoldCircuit
-    fn compute_cf_cmT(
-        &self,
-        cf_w_i: &Witness<C2>,
-        cf_u_i: &CommittedInstance<C2>,
-        cf_W_i: &Witness<C2>,
-        cf_U_i: &CommittedInstance<C2>,
-    ) -> Result<(Vec<C2::ScalarField>, C2), Error> {
-        NIFS::<C2, CS2>::compute_cyclefold_cmT(
-            &self.cf_cs_params,
-            &self.cf_r1cs,
-            cf_w_i,
-            cf_u_i,
-            cf_W_i,
-            cf_U_i,
         )
     }
 }
@@ -682,8 +813,9 @@ where
 {
     // folds the given cyclefold circuit and its instances
     #[allow(clippy::type_complexity)]
-    fn fold_cyclefold_circuit(
+    fn fold_cyclefold_circuit<T: Transcript<C1::ScalarField>>(
         &self,
+        transcript: &mut T,
         cf_W_i: Witness<C2>,           // witness of the running instance
         cf_U_i: CommittedInstance<C2>, // running instance
         cf_u_i_x: Vec<C2::ScalarField>,
@@ -699,41 +831,17 @@ where
         ),
         Error,
     > {
-        let cs2 = ConstraintSystem::<C1::BaseField>::new_ref();
-        cf_circuit.generate_constraints(cs2.clone())?;
-
-        let cs2 = cs2.into_inner().ok_or(Error::NoInnerConstraintSystem)?;
-        let (cf_w_i, cf_x_i) = extract_w_x::<C1::BaseField>(&cs2);
-        if cf_x_i != cf_u_i_x {
-            return Err(Error::NotEqual);
-        }
-
-        #[cfg(test)]
-        if cf_x_i.len() != CF_IO_LEN {
-            return Err(Error::NotExpectedLength(cf_x_i.len(), CF_IO_LEN));
-        }
-
-        // fold cyclefold instances
-        let cf_w_i = Witness::<C2>::new(cf_w_i.clone(), self.cf_r1cs.A.n_rows);
-        let cf_u_i: CommittedInstance<C2> =
-            cf_w_i.commit::<CS2>(&self.cf_cs_params, cf_x_i.clone())?;
-
-        // compute T* and cmT* for CycleFoldCircuit
-        let (cf_T, cf_cmT) = self.compute_cf_cmT(&cf_w_i, &cf_u_i, &cf_W_i, &cf_U_i)?;
-
-        let cf_r_bits = CycleFoldChallengeGadget::<C2, GC2>::get_challenge_native(
-            &self.poseidon_config,
-            cf_U_i.clone(),
-            cf_u_i.clone(),
-            cf_cmT,
-        )?;
-        let cf_r_Fq = C1::BaseField::from_bigint(BigInteger::from_bits_le(&cf_r_bits))
-            .ok_or(Error::OutOfBounds)?;
-
-        let (cf_W_i1, cf_U_i1) = NIFS::<C2, CS2>::fold_instances(
-            cf_r_Fq, &cf_W_i, &cf_U_i, &cf_w_i, &cf_u_i, &cf_T, cf_cmT,
-        )?;
-        Ok((cf_w_i, cf_u_i, cf_W_i1, cf_U_i1, cf_cmT, cf_r_Fq))
+        fold_cyclefold_circuit::<C1, GC1, C2, GC2, FC, CS1, CS2>(
+            NOVA_CF_N_POINTS,
+            transcript,
+            self.cf_r1cs.clone(),
+            self.cf_cs_pp.clone(),
+            self.pp_hash,
+            cf_W_i,
+            cf_U_i,
+            cf_u_i_x,
+            cf_circuit,
+        )
     }
 }
 
@@ -771,7 +879,7 @@ where
 {
     let augmented_F_circuit =
         AugmentedFCircuit::<C1, C2, GC2, FC>::empty(poseidon_config, F_circuit);
-    let cf_circuit = CycleFoldCircuit::<C1, GC1>::empty();
+    let cf_circuit = CycleFoldCircuit::<C1, GC1>::empty(NOVA_CF_N_POINTS);
     let r1cs = get_r1cs_from_cs::<C1::ScalarField>(augmented_F_circuit)?;
     let cf_r1cs = get_r1cs_from_cs::<C2::ScalarField>(cf_circuit)?;
     Ok((r1cs, cf_r1cs))
@@ -801,23 +909,13 @@ where
     Ok((r1cs.A.n_rows, cf_r1cs.A.n_rows))
 }
 
-/// returns the coordinates of a commitment point. This is compatible with the arkworks
-/// GC.to_constraint_field()[..2]
-pub(crate) fn get_cm_coordinates<C: CurveGroup>(cm: &C) -> Vec<C::BaseField> {
-    let zero = (&C::BaseField::zero(), &C::BaseField::zero());
-    let cm = cm.into_affine();
-    let (cm_x, cm_y) = cm.xy().unwrap_or(zero);
-    vec![*cm_x, *cm_y]
-}
-
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::commitment::kzg::{ProverKey as KZGProverKey, KZG};
+    use crate::commitment::kzg::KZG;
     use ark_bn254::{constraints::GVar, Bn254, Fr, G1Projective as Projective};
     use ark_grumpkin::{constraints::GVar as GVar2, Projective as Projective2};
-    use ark_poly_commit::kzg10::VerifierKey as KZGVerifierKey;
 
+    use super::*;
     use crate::commitment::pedersen::Pedersen;
     use crate::frontend::tests::CubicFCircuit;
     use crate::transcript::poseidon::poseidon_canonical_config;
@@ -826,72 +924,50 @@ pub mod tests {
     /// AugmentedFCircuit
     #[test]
     fn test_ivc() {
-        let mut rng = ark_std::test_rng();
         let poseidon_config = poseidon_canonical_config::<Fr>();
 
         let F_circuit = CubicFCircuit::<Fr>::new(()).unwrap();
 
-        let (cs_len, cf_cs_len) =
-            get_cs_params_len::<Projective, GVar, Projective2, GVar2, CubicFCircuit<Fr>>(
-                &poseidon_config,
-                F_circuit,
-            )
-            .unwrap();
-        let (kzg_pk, _): (KZGProverKey<Projective>, KZGVerifierKey<Bn254>) =
-            KZG::<Bn254>::setup(&mut rng, cs_len).unwrap();
-        let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, cs_len).unwrap();
-        let (cf_pedersen_params, _) = Pedersen::<Projective2>::setup(&mut rng, cf_cs_len).unwrap();
-
         // run the test using Pedersen commitments on both sides of the curve cycle
         test_ivc_opt::<Pedersen<Projective>, Pedersen<Projective2>>(
             poseidon_config.clone(),
-            pedersen_params,
-            cf_pedersen_params.clone(),
             F_circuit,
         );
         // run the test using KZG for the commitments on the main curve, and Pedersen for the
         // commitments on the secondary curve
-        test_ivc_opt::<KZG<Bn254>, Pedersen<Projective2>>(
-            poseidon_config,
-            kzg_pk,
-            cf_pedersen_params,
-            F_circuit,
-        );
+        test_ivc_opt::<KZG<Bn254>, Pedersen<Projective2>>(poseidon_config, F_circuit);
     }
 
     // test_ivc allowing to choose the CommitmentSchemes
     fn test_ivc_opt<CS1: CommitmentScheme<Projective>, CS2: CommitmentScheme<Projective2>>(
         poseidon_config: PoseidonConfig<Fr>,
-        cs_params: CS1::ProverParams,
-        cf_cs_params: CS2::ProverParams,
         F_circuit: CubicFCircuit<Fr>,
     ) {
-        type NOVA<CS1, CS2> =
-            Nova<Projective, GVar, Projective2, GVar2, CubicFCircuit<Fr>, CS1, CS2>;
+        let mut rng = ark_std::test_rng();
+        type N<CS1, CS2> = Nova<Projective, GVar, Projective2, GVar2, CubicFCircuit<Fr>, CS1, CS2>;
 
-        let prover_params = ProverParams::<Projective, Projective2, CS1, CS2> {
-            poseidon_config: poseidon_config.clone(),
-            cs_params,
-            cf_cs_params,
+        let prep_param = PreprocessorParam::<Projective, Projective2, CubicFCircuit<Fr>, CS1, CS2> {
+            poseidon_config,
+            F: F_circuit,
+            cs_pp: None,
+            cs_vp: None,
+            cf_cs_pp: None,
+            cf_cs_vp: None,
         };
+        let nova_params = N::preprocess(&mut rng, &prep_param).unwrap();
 
         let z_0 = vec![Fr::from(3_u32)];
-        let mut nova = NOVA::init(&prover_params, F_circuit, z_0.clone()).unwrap();
+        let mut nova = N::init(&nova_params, F_circuit, z_0.clone()).unwrap();
 
         let num_steps: usize = 3;
         for _ in 0..num_steps {
-            nova.prove_step(vec![]).unwrap();
+            nova.prove_step(&mut rng, vec![], None).unwrap();
         }
         assert_eq!(Fr::from(num_steps as u32), nova.i);
 
-        let verifier_params = VerifierParams::<Projective, Projective2> {
-            poseidon_config,
-            r1cs: nova.clone().r1cs,
-            cf_r1cs: nova.clone().cf_r1cs,
-        };
         let (running_instance, incoming_instance, cyclefold_instance) = nova.instances();
-        NOVA::<CS1, CS2>::verify(
-            verifier_params,
+        N::<CS1, CS2>::verify(
+            nova_params.1, // Nova's verifier params
             z_0,
             nova.z_i,
             nova.i,

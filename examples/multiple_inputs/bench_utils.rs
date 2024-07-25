@@ -3,10 +3,11 @@ use std::error::Error;
 use std::time::Duration;
 use ark_ff::{ PrimeField};
 use csv::Writer;
-use folding_schemes::ccs::r1cs::R1CS;
+use folding_schemes::arith::r1cs;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use num_bigint::BigUint;
 use rand::Rng;
+use folding_schemes::arith::r1cs::R1CS;
 
 fn create_large_diagonal_matrix<F: PrimeField>(power: usize) -> SparseMatrix<F> {
     let size = 1 << power;

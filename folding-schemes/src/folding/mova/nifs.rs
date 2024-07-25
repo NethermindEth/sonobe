@@ -5,11 +5,12 @@ use ark_ff::PrimeField;
 use ark_poly::MultilinearExtension;
 use ark_std::{log2, Zero};
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use super::homogenization::{HomogeneousEvaluationClaim, Homogenization};
 
 use super::{CommittedInstance, InstanceWitness, Witness};
-use crate::ccs::r1cs::R1CS;
+use crate::arith::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
 use crate::transcript::Transcript;
 
@@ -21,7 +22,7 @@ use crate::Error;
 
 /// Proof defines a multifolding proof
 #[derive(Clone, Debug)]
-pub struct Proof<C: CurveGroup, T: Transcript<C>, H: Homogenization<C, T>> {
+pub struct Proof<C: CurveGroup, T: Transcript<C::ScalarField>, H: Homogenization<C, T>> {
     pub hg_proof: H::Proof,
     pub mleE1_prime: C::ScalarField,
     pub mleE2_prime: C::ScalarField,
@@ -30,17 +31,17 @@ pub struct Proof<C: CurveGroup, T: Transcript<C>, H: Homogenization<C, T>> {
 
 /// Implements the Non-Interactive Folding Scheme described in section 4 of
 /// [Nova](https://eprint.iacr.org/2021/370.pdf)
-pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C>, H: Homogenization<C, T>> {
+pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, H: Homogenization<C, T>> {
     _c: PhantomData<C>,
     _cp: PhantomData<CS>,
     _ct: PhantomData<T>,
     _ch: PhantomData<H>,
 }
 
-impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C>, H: Homogenization<C, T>>
-    NIFS<C, CS, T, H>
-where
-    <C as Group>::ScalarField: Absorb,
+impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, H: Homogenization<C, T>>
+NIFS<C, CS, T, H>
+    where
+        <C as Group>::ScalarField: Absorb,
 {
     // compute_T: compute cross-terms T
     pub fn compute_T(
@@ -181,12 +182,15 @@ where
     pub fn prove(
         _cs_prover_params: &CS::ProverParams,
         r1cs: &R1CS<C::ScalarField>,
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
     ) -> Result<(Proof<C, T, H>, InstanceWitness<C>), Error> {
+        let start = Instant::now();
+        let elapsed = start.elapsed();
+        println!("Time before homogenization point-vs-line {:?}", elapsed);
         let (
             hg_proof,
             HomogeneousEvaluationClaim {
@@ -195,6 +199,9 @@ where
                 rE_prime,
             },
         ) = H::prove(transcript, ci1, ci2, w1, w2)?;
+        let elapsed = start.elapsed();
+        println!("Time after homogenization point-vs-line {:?}", elapsed);
+
 
         transcript.absorb(&mleE1_prime);
         transcript.absorb(&mleE2_prime);
@@ -202,7 +209,14 @@ where
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
 
+        let elapsed = start.elapsed();
+        println!("Time before computing T {:?}", elapsed);
+
         let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
+
+        let elapsed = start.elapsed();
+        println!("Time after computing T {:?}", elapsed);
+
 
         let vars = log2(w1.E.len()) as usize;
 
@@ -210,8 +224,13 @@ where
             return Err(Error::NotEqual);
         }
 
+        let elapsed = start.elapsed();
+        println!("Time before mleT evaluation {:?}", elapsed);
         let mleT = dense_vec_to_dense_mle(vars, &T);
         let mleT_evaluated = mleT.evaluate(&rE_prime).ok_or(Error::EvaluationFail)?;
+
+        let elapsed = start.elapsed();
+        println!("Time after mleT evaluation {:?}", elapsed);
 
         transcript.absorb(&mleT_evaluated);
 
@@ -220,7 +239,9 @@ where
         let rho: C::ScalarField = transcript.get_challenge();
         let _r2 = rho * rho;
 
-        Ok((
+        let elapsed = start.elapsed();
+        println!("Time before start folding {:?}", elapsed);
+        let temp = Ok((
             Proof {
                 hg_proof,
                 mleE1_prime,
@@ -239,13 +260,16 @@ where
                 )?,
                 w: Self::fold_witness(rho, w1, w2, &T)?,
             },
-        ))
+        ));
+        let elapsed = start.elapsed();
+        println!("Time after folding {:?}", elapsed);
+        temp
     }
 
     /// verify implements NIFS.V logic described in [Nova](https://eprint.iacr.org/2021/370.pdf)'s
     /// section 4. It returns the folded Committed Instance
     pub fn verify(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         proof: &Proof<C, T, H>,
@@ -279,7 +303,7 @@ where
     }
 
     pub fn prove_expansion(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci: &CommittedInstance<C>,
         w: &Witness<C>,
     ) -> Result<CommittedInstance<C>, Error> {
@@ -305,7 +329,7 @@ where
 
     // Do the verifier's expansion part.
     pub fn verify_expansion(
-        transcript: &mut impl Transcript<C>,
+        transcript: &mut impl Transcript<C::ScalarField>,
         ci: &CommittedInstance<C>,
         n_vars_mleE: usize,
     ) -> Result<CommittedInstance<C>, Error> {

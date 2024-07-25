@@ -5,7 +5,7 @@ use ark_crypto_primitives::{
     sponge::{poseidon::PoseidonConfig, Absorb},
 };
 use ark_ec::{AffineRepr, CurveGroup, Group};
-use ark_ff::ToConstraintField;
+use ark_ff::{PrimeField, ToConstraintField};
 use ark_poly::MultilinearExtension;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -15,11 +15,10 @@ use ark_std::{One, Zero};
 use std::usize;
 
 use crate::commitment::CommitmentScheme;
-use crate::folding::circuits::nonnative::{
-    affine::nonnative_affine_to_field_elements, uint::nonnative_field_to_field_elements,
-};
+
 use crate::utils::vec::is_zero_vec;
 use crate::Error;
+use crate::transcript::{AbsorbNonNative, Transcript};
 
 use crate::utils::mle::dense_vec_to_dense_mle;
 
@@ -51,74 +50,71 @@ impl<C: CurveGroup> CommittedInstance<C> {
     }
 }
 
+impl<C: CurveGroup> Absorb for CommittedInstance<C>
+    where
+        C::ScalarField: Absorb,
+{
+    fn to_sponge_bytes(&self, dest: &mut Vec<u8>) {
+        // This is never called
+        unimplemented!()
+    }
+
+    fn to_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
+        self.u.to_sponge_field_elements(dest);
+        self.x.to_sponge_field_elements(dest);
+        self.cmW
+            .to_native_sponge_field_elements_as_vec()
+            .to_sponge_field_elements(dest);
+    }
+}
+
+impl<C: CurveGroup> AbsorbNonNative<C::BaseField> for CommittedInstance<C>
+    where
+        <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField + Absorb,
+{
+    fn to_native_sponge_field_elements(&self, dest: &mut Vec<C::BaseField>) {
+        self.rE.to_native_sponge_field_elements(dest);
+        [self.mleE].to_native_sponge_field_elements(dest);
+        [self.u].to_native_sponge_field_elements(dest);
+        self.x.to_native_sponge_field_elements(dest);
+        let (cmW_x, cmW_y) = match self.cmW.into_affine().xy() {
+            Some((&x, &y)) => (x, y),
+            None => (C::BaseField::zero(), C::BaseField::zero()),
+        };
+
+        cmW_x.to_sponge_field_elements(dest);
+        cmW_y.to_sponge_field_elements(dest);
+    }
+}
+
 impl<C: CurveGroup> CommittedInstance<C>
-where
-    <C as Group>::ScalarField: Absorb,
-    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField,
+    where
+        <C as Group>::ScalarField: Absorb,
+        <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField,
 {
     /// hash implements the committed instance hash compatible with the gadget implemented in
     /// nova/circuits.rs::CommittedInstanceVar.hash.
     /// Returns `H(i, z_0, z_i, U_i)`, where `i` can be `i` but also `i+1`, and `U_i` is the
     /// `CommittedInstance`.
-    pub fn hash(
+    pub fn hash<T: Transcript<C::ScalarField>>(
         &self,
-        poseidon_config: &PoseidonConfig<C::ScalarField>,
+        sponge: &T,
+        pp_hash: C::ScalarField, // public params hash
         i: C::ScalarField,
         z_0: Vec<C::ScalarField>,
         z_i: Vec<C::ScalarField>,
-    ) -> Result<C::ScalarField, Error> {
-        // let (cmE_x, cmE_y) = nonnative_affine_to_field_elements::<C>(self.cmE)?;
-        let (cmW_x, cmW_y) = nonnative_affine_to_field_elements::<C>(self.cmW)?;
-
-        CRH::<C::ScalarField>::evaluate(
-            poseidon_config,
-            [
-                vec![i],
-                z_0,
-                z_i,
-                vec![self.u],
-                self.x.clone(),
-                vec![self.mleE],
-                cmW_x,
-                cmW_y,
-            ]
-            .concat(),
-        )
-        .map_err(|e| Error::Other(e.to_string()))
+    ) -> C::ScalarField {
+        let mut sponge = sponge.clone();
+        sponge.absorb(&pp_hash);
+        sponge.absorb(&i);
+        sponge.absorb(&z_0);
+        sponge.absorb(&z_i);
+        sponge.absorb(&self);
+        sponge.squeeze_field_elements(1)[0]
     }
 }
 
-impl<C: CurveGroup> ToConstraintField<C::BaseField> for CommittedInstance<C>
-where
-    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField + Absorb,
-{
-    fn to_field_elements(&self) -> Option<Vec<C::BaseField>> {
-        let rE = self
-            .rE
-            .iter()
-            .flat_map(nonnative_field_to_field_elements)
-            .collect();
-        let mleE = nonnative_field_to_field_elements(&self.mleE);
-        let u = nonnative_field_to_field_elements(&self.u);
-        let x = self
-            .x
-            .iter()
-            .flat_map(nonnative_field_to_field_elements)
-            .collect::<Vec<_>>();
-        let (cmW_x, cmW_y, cmW_is_inf) = match self.cmW.into_affine().xy() {
-            Some((&x, &y)) => (x, y, C::BaseField::zero()),
-            None => (
-                C::BaseField::zero(),
-                C::BaseField::zero(),
-                C::BaseField::one(),
-            ),
-        };
-        // Concatenate `cmE_is_inf` and `cmW_is_inf` to save constraints for CRHGadget::evaluate in the corresponding circuit
-        let is_inf = cmW_is_inf;
 
-        Some([u, x, rE, mleE, vec![cmW_x, cmW_y, is_inf]].concat())
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Witness<C: CurveGroup> {

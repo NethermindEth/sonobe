@@ -7,16 +7,17 @@ use folding_schemes::commitment::CommitmentScheme;
 use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
 use folding_schemes::folding::nova::Witness;
-use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
+use folding_schemes::transcript::poseidon::{poseidon_canonical_config};
 use folding_schemes::transcript::Transcript;
 use folding_schemes::utils::sum_check::{ SumCheck};
-use num_traits::{One, Zero};
 use rand::Rng;
 use std::mem::size_of_val;
 use std::time::{Duration, Instant};
 
 use std::error::Error;
-use csv::Writer;
+use ark_crypto_primitives::sponge::CryptographicSponge;
+use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
+use ark_ec::CurveGroup;
 
 mod bench_utils;
 
@@ -64,19 +65,20 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &witness_2,
         &incoming_committed_instance,
     )
-    .unwrap();
+        .unwrap();
 
-    match transcript_p.absorb_point(&cmT) {
-        Ok(_) => {
-            //
-        }
-        Err(e) => {
-            println!("Absorbed failed: {:?}", e);
-        }
-    }
+    let elapsed = start.elapsed();
+    println!("Time before Randomness generation {:?}", elapsed);
+    transcript_p.absorb_nonnative(&cmT);
 
     let r = transcript_p.get_challenge();
-    let result = NIFS::<Projective, Pedersen<Projective>>::fold_instances(
+    let elapsed = start.elapsed();
+    println!("Time aftre Randomness generation {:?}", elapsed);
+
+    let elapsed = start.elapsed();
+    println!("Time before starting folding {:?}", elapsed);
+
+    let result = NIFS::<G1, Pedersen<G1>>::fold_instances(
         r,
         &witness_1,
         &running_committed_instance,
@@ -85,7 +87,10 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &T,
         cmT,
     )
-    .unwrap();
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    println!("Time after folding {:?}", elapsed);
 
     let prove_time = start.elapsed();
     prove_times.push(prove_time);
@@ -111,7 +116,8 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
 fn main() {
     println!("starting");
 
-    let pows: Vec<usize> = (10..24).collect();
+    // let pows: Vec<usize> = (10..24).collect();
+    let pows: Vec<usize> = vec![16, 20];
     println!("{:?}", pows);
 
     let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());
@@ -139,5 +145,5 @@ fn main() {
     } else {
         println!("CSV file has been successfully written.");
     }
-    
+
 }
