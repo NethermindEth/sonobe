@@ -1,14 +1,12 @@
-# sonobe
+# Benchmarks
 
-# Benchmarks 
-
-To run the benchmarks use 
+To run the benchmarks use
 
 `cargo run --release --example <folding>`
 
-For Mova you need to specify the homogenization. Either `point` or  `sumcheck`
+**Folding options:** mova, nova, hp
 
-# Sonobe ReadMe
+# sonobe
 
 Experimental folding schemes library implemented jointly by [0xPARC](https://0xparc.org/) and [PSE](https://pse.dev).
 
@@ -31,10 +29,10 @@ Folding schemes implemented:
 
 - [Nova: Recursive Zero-Knowledge Arguments from Folding Schemes](https://eprint.iacr.org/2021/370.pdf), Abhiram Kothapalli, Srinath Setty, Ioanna Tzialla. 2021
 - [CycleFold: Folding-scheme-based recursive arguments over a cycle of elliptic curves](https://eprint.iacr.org/2023/1192.pdf), Abhiram Kothapalli, Srinath Setty. 2023
+- [HyperNova: Recursive arguments for customizable constraint systems](https://eprint.iacr.org/2023/573.pdf), Abhiram Kothapalli, Srinath Setty. 2023
 
 Work in progress:
 
-- [HyperNova: Recursive arguments for customizable constraint systems](https://eprint.iacr.org/2023/573.pdf), Abhiram Kothapalli, Srinath Setty. 2023
 - [ProtoGalaxy: Efficient ProtoStar-style folding of multiple instances](https://eprint.iacr.org/2023/1106.pdf), Liam Eagen, Ariel Gabizon. 2023
 
 ## Available frontends
@@ -43,6 +41,7 @@ Available frontends to define the folded circuit:
 
 - [arkworks](https://github.com/arkworks-rs), arkworks contributors
 - [Circom](https://github.com/iden3/circom), iden3, 0Kims Association
+- [Noname](https://github.com/zksecurity/noname), zkSecurity
 
 ## Usage
 

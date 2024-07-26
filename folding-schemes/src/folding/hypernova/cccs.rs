@@ -1,3 +1,4 @@
+use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
 use ark_std::One;
@@ -6,23 +7,14 @@ use std::sync::Arc;
 
 use ark_std::rand::Rng;
 
-use crate::ccs::CCS;
-use crate::commitment::{
-    pedersen::{Params as PedersenParams, Pedersen},
-    CommitmentScheme,
-};
-use crate::utils::hypercube::BooleanHypercube;
+use super::Witness;
+use crate::arith::{ccs::CCS, Arith};
+use crate::commitment::CommitmentScheme;
+use crate::transcript::AbsorbNonNative;
 use crate::utils::mle::dense_vec_to_dense_mle;
 use crate::utils::vec::mat_vec_mul;
 use crate::utils::virtual_polynomial::{build_eq_x_r_vec, VirtualPolynomial};
 use crate::Error;
-
-/// Witness for the LCCCS & CCCS, containing the w vector, and the r_w used as randomness in the Pedersen commitment.
-#[derive(Debug, Clone)]
-pub struct Witness<F: PrimeField> {
-    pub w: Vec<F>,
-    pub r_w: F, // randomness used in the Pedersen commitment of w
-}
 
 /// Committed CCS instance
 #[derive(Debug, Clone)]
@@ -34,10 +26,10 @@ pub struct CCCS<C: CurveGroup> {
 }
 
 impl<F: PrimeField> CCS<F> {
-    pub fn to_cccs<R: Rng, C: CurveGroup>(
+    pub fn to_cccs<R: Rng, C: CurveGroup, CS: CommitmentScheme<C>>(
         &self,
         rng: &mut R,
-        pedersen_params: &PedersenParams<C>,
+        cs_params: &CS::ProverParams,
         z: &[C::ScalarField],
     ) -> Result<(CCCS<C>, Witness<C::ScalarField>), Error>
     where
@@ -45,8 +37,14 @@ impl<F: PrimeField> CCS<F> {
         C: CurveGroup<ScalarField = F>,
     {
         let w: Vec<C::ScalarField> = z[(1 + self.l)..].to_vec();
-        let r_w = C::ScalarField::rand(rng);
-        let C = Pedersen::<C, true>::commit(pedersen_params, &w, &r_w)?;
+
+        // if the commitment scheme is set to be hiding, set the random blinding parameter
+        let r_w = if CS::is_hiding() {
+            C::ScalarField::rand(rng)
+        } else {
+            C::ScalarField::zero()
+        };
+        let C = CS::commit(cs_params, &w, &r_w)?;
 
         Ok((
             CCCS::<C> {
@@ -92,44 +90,65 @@ impl<F: PrimeField> CCS<F> {
 }
 
 impl<C: CurveGroup> CCCS<C> {
-    /// Perform the check of the CCCS instance described at section 4.1
+    pub fn dummy(l: usize) -> CCCS<C>
+    where
+        C::ScalarField: PrimeField,
+    {
+        CCCS::<C> {
+            C: C::zero(),
+            x: vec![C::ScalarField::zero(); l],
+        }
+    }
+
+    /// Perform the check of the CCCS instance described at section 4.1,
+    /// notice that this method does not check the commitment correctness
     pub fn check_relation(
         &self,
-        pedersen_params: &PedersenParams<C>,
         ccs: &CCS<C::ScalarField>,
         w: &Witness<C::ScalarField>,
     ) -> Result<(), Error> {
-        // check that C is the commitment of w. Notice that this is not verifying a Pedersen
-        // opening, but checking that the commitment comes from committing to the witness.
-        if self.C != Pedersen::<C, true>::commit(pedersen_params, &w.w, &w.r_w)? {
-            return Err(Error::NotSatisfied);
-        }
-
         // check CCCS relation
         let z: Vec<C::ScalarField> =
             [vec![C::ScalarField::one()], self.x.clone(), w.w.to_vec()].concat();
 
-        // A CCCS relation is satisfied if the q(x) multivariate polynomial evaluates to zero in the hypercube
-        let q_x = ccs.compute_q(&z)?;
-
-        for x in BooleanHypercube::new(ccs.s) {
-            if !q_x.evaluate(&x)?.is_zero() {
-                return Err(Error::NotSatisfied);
-            }
-        }
+        // A CCCS relation is satisfied if the q(x) multivariate polynomial evaluates to zero in
+        // the hypercube, evaluating over the whole boolean hypercube for a normal-sized instance
+        // would take too much, this checks the CCS relation of the CCCS.
+        ccs.check_relation(&z)?;
 
         Ok(())
     }
 }
 
+impl<C: CurveGroup> Absorb for CCCS<C>
+where
+    C::ScalarField: Absorb,
+{
+    fn to_sponge_bytes(&self, _dest: &mut Vec<u8>) {
+        // This is never called
+        unimplemented!()
+    }
+
+    fn to_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
+        // We cannot call `to_native_sponge_field_elements(dest)` directly, as
+        // `to_native_sponge_field_elements` needs `F` to be `C::ScalarField`,
+        // but here `F` is a generic `PrimeField`.
+        self.C
+            .to_native_sponge_field_elements_as_vec()
+            .to_sponge_field_elements(dest);
+        self.x.to_sponge_field_elements(dest);
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::ccs::tests::{get_test_ccs, get_test_z};
+    use ark_pallas::Fr;
     use ark_std::test_rng;
     use ark_std::UniformRand;
 
-    use ark_pallas::Fr;
+    use super::*;
+    use crate::arith::ccs::tests::{get_test_ccs, get_test_z};
+    use crate::utils::hypercube::BooleanHypercube;
 
     /// Do some sanity checks on q(x). It's a multivariable polynomial and it should evaluate to zero inside the
     /// hypercube, but to not-zero outside the hypercube.

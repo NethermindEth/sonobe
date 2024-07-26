@@ -1,16 +1,15 @@
-use ark_ec::CurveGroup;
+use ark_crypto_primitives::sponge::Absorb;
+use ark_ec::{CurveGroup, Group};
 use ark_ff::PrimeField;
 use ark_poly::DenseMultilinearExtension;
 use ark_poly::MultilinearExtension;
-
 use ark_std::rand::Rng;
+use ark_std::Zero;
 
-use super::cccs::Witness;
-use crate::ccs::CCS;
-use crate::commitment::{
-    pedersen::{Params as PedersenParams, Pedersen},
-    CommitmentScheme,
-};
+use super::Witness;
+use crate::arith::ccs::CCS;
+use crate::commitment::CommitmentScheme;
+use crate::transcript::{AbsorbNonNative, Transcript};
 use crate::utils::mle::dense_vec_to_dense_mle;
 use crate::utils::vec::mat_vec_mul;
 use crate::Error;
@@ -31,10 +30,10 @@ pub struct LCCCS<C: CurveGroup> {
 }
 
 impl<F: PrimeField> CCS<F> {
-    pub fn to_lcccs<R: Rng, C: CurveGroup>(
+    pub fn to_lcccs<R: Rng, C: CurveGroup, CS: CommitmentScheme<C>>(
         &self,
         rng: &mut R,
-        pedersen_params: &PedersenParams<C>,
+        cs_params: &CS::ProverParams,
         z: &[C::ScalarField],
     ) -> Result<(LCCCS<C>, Witness<C::ScalarField>), Error>
     where
@@ -42,8 +41,13 @@ impl<F: PrimeField> CCS<F> {
         C: CurveGroup<ScalarField = F>,
     {
         let w: Vec<C::ScalarField> = z[(1 + self.l)..].to_vec();
-        let r_w = C::ScalarField::rand(rng);
-        let C = Pedersen::<C, true>::commit(pedersen_params, &w, &r_w)?;
+        // if the commitment scheme is set to be hiding, set the random blinding parameter
+        let r_w = if CS::is_hiding() {
+            C::ScalarField::rand(rng)
+        } else {
+            C::ScalarField::zero()
+        };
+        let C = CS::commit(cs_params, &w, &r_w)?;
 
         let r_x: Vec<C::ScalarField> = (0..self.s).map(|_| C::ScalarField::rand(rng)).collect();
 
@@ -73,19 +77,26 @@ impl<F: PrimeField> CCS<F> {
 }
 
 impl<C: CurveGroup> LCCCS<C> {
-    /// Perform the check of the LCCCS instance described at section 4.2
+    pub fn dummy(l: usize, t: usize, s: usize) -> LCCCS<C>
+    where
+        C::ScalarField: PrimeField,
+    {
+        LCCCS::<C> {
+            C: C::zero(),
+            u: C::ScalarField::zero(),
+            x: vec![C::ScalarField::zero(); l],
+            r_x: vec![C::ScalarField::zero(); s],
+            v: vec![C::ScalarField::zero(); t],
+        }
+    }
+
+    /// Perform the check of the LCCCS instance described at section 4.2,
+    /// notice that this method does not check the commitment correctness
     pub fn check_relation(
         &self,
-        pedersen_params: &PedersenParams<C>,
         ccs: &CCS<C::ScalarField>,
         w: &Witness<C::ScalarField>,
     ) -> Result<(), Error> {
-        // check that C is the commitment of w. Notice that this is not verifying a Pedersen
-        // opening, but checking that the Commitment comes from committing to the witness.
-        if self.C != Pedersen::<C, true>::commit(pedersen_params, &w.w, &w.r_w)? {
-            return Err(Error::NotSatisfied);
-        }
-
         // check CCS relation
         let z: Vec<C::ScalarField> = [vec![self.u], self.x.clone(), w.w.to_vec()].concat();
 
@@ -104,20 +115,70 @@ impl<C: CurveGroup> LCCCS<C> {
     }
 }
 
+impl<C: CurveGroup> Absorb for LCCCS<C>
+where
+    C::ScalarField: Absorb,
+{
+    fn to_sponge_bytes(&self, _dest: &mut Vec<u8>) {
+        // This is never called
+        unimplemented!()
+    }
+
+    fn to_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
+        // We cannot call `to_native_sponge_field_elements(dest)` directly, as
+        // `to_native_sponge_field_elements` needs `F` to be `C::ScalarField`,
+        // but here `F` is a generic `PrimeField`.
+        self.C
+            .to_native_sponge_field_elements_as_vec()
+            .to_sponge_field_elements(dest);
+        self.u.to_sponge_field_elements(dest);
+        self.x.to_sponge_field_elements(dest);
+        self.r_x.to_sponge_field_elements(dest);
+        self.v.to_sponge_field_elements(dest);
+    }
+}
+
+impl<C: CurveGroup> LCCCS<C>
+where
+    <C as Group>::ScalarField: Absorb,
+    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField,
+{
+    /// [`LCCCS`].hash implements the committed instance hash compatible with the gadget
+    /// implemented in nova/circuits.rs::CommittedInstanceVar.hash.
+    /// Returns `H(i, z_0, z_i, U_i)`, where `i` can be `i` but also `i+1`, and `U_i` is the LCCCS.
+    pub fn hash<T: Transcript<C::ScalarField>>(
+        &self,
+        sponge: &T,
+        pp_hash: C::ScalarField,
+        i: C::ScalarField,
+        z_0: Vec<C::ScalarField>,
+        z_i: Vec<C::ScalarField>,
+    ) -> C::ScalarField {
+        let mut sponge = sponge.clone();
+        sponge.absorb(&pp_hash);
+        sponge.absorb(&i);
+        sponge.absorb(&z_0);
+        sponge.absorb(&z_i);
+        sponge.absorb(&self);
+        sponge.squeeze_field_elements(1)[0]
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use ark_pallas::{Fr, Projective};
     use ark_std::test_rng;
     use ark_std::One;
     use ark_std::UniformRand;
-    use ark_std::Zero;
     use std::sync::Arc;
 
     use super::*;
-    use crate::ccs::{
+    use crate::arith::{
+        ccs::tests::{get_test_ccs, get_test_z},
         r1cs::R1CS,
-        tests::{get_test_ccs, get_test_z},
+        Arith,
     };
+    use crate::commitment::pedersen::Pedersen;
     use crate::utils::hypercube::BooleanHypercube;
     use crate::utils::virtual_polynomial::{build_eq_x_r_vec, VirtualPolynomial};
 
@@ -152,14 +213,16 @@ pub mod tests {
 
         let n_rows = 2_u32.pow(5) as usize;
         let n_cols = 2_u32.pow(5) as usize;
-        let r1cs = R1CS::rand(&mut rng, n_rows, n_cols);
+        let r1cs = R1CS::<Fr>::rand(&mut rng, n_rows, n_cols);
         let ccs = CCS::from_r1cs(r1cs);
         let z: Vec<Fr> = (0..n_cols).map(|_| Fr::rand(&mut rng)).collect();
 
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
 
-        let (lcccs, _) = ccs.to_lcccs(&mut rng, &pedersen_params, &z).unwrap();
+        let (lcccs, _) = ccs
+            .to_lcccs::<_, Projective, Pedersen<Projective>>(&mut rng, &pedersen_params, &z)
+            .unwrap();
         // with our test vector coming from R1CS, v should have length 3
         assert_eq!(lcccs.v.len(), 3);
 
@@ -191,7 +254,9 @@ pub mod tests {
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
         // Compute v_j with the right z
-        let (lcccs, _) = ccs.to_lcccs(&mut rng, &pedersen_params, &z).unwrap();
+        let (lcccs, _) = ccs
+            .to_lcccs::<_, Projective, Pedersen<Projective>>(&mut rng, &pedersen_params, &z)
+            .unwrap();
         // with our test vector coming from R1CS, v should have length 3
         assert_eq!(lcccs.v.len(), 3);
 

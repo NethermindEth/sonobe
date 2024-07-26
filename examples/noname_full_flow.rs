@@ -10,12 +10,10 @@
 /// - verify the proof in the EVM
 ///
 use ark_bn254::{constraints::GVar, Bn254, Fr, G1Projective as G1};
+use noname::backends::r1cs::R1csBn254Field;
 
 use ark_groth16::Groth16;
 use ark_grumpkin::{constraints::GVar as GVar2, Projective as G2};
-
-use std::path::PathBuf;
-use std::time::Instant;
 
 use folding_schemes::{
     commitment::{kzg::KZG, pedersen::Pedersen},
@@ -23,10 +21,12 @@ use folding_schemes::{
         decider_eth::{prepare_calldata, Decider as DeciderEth},
         Nova, PreprocessorParam,
     },
-    frontend::{circom::CircomFCircuit, FCircuit},
+    frontend::{noname::NonameFCircuit, FCircuit},
     transcript::poseidon::poseidon_canonical_config,
     Decider, FoldingScheme,
 };
+use std::time::Instant;
+
 use solidity_verifiers::{
     evm::{compile_solidity, Evm},
     utils::get_function_selector_for_nova_cyclefold_verifier,
@@ -35,42 +35,43 @@ use solidity_verifiers::{
 };
 
 fn main() {
+    const NONAME_CIRCUIT_EXTERNAL_INPUTS: &str =
+        "fn main(pub ivc_inputs: [Field; 2], external_inputs: [Field; 2]) -> [Field; 2] {
+    let xx = external_inputs[0] + ivc_inputs[0];
+    let yy = external_inputs[1] * ivc_inputs[1];
+    assert_eq(yy, xx);
+    return [xx, yy];
+}";
+
     // set the initial state
-    let z_0 = vec![Fr::from(3_u32)];
+    let z_0 = vec![Fr::from(2), Fr::from(5)];
 
     // set the external inputs to be used at each step of the IVC, it has length of 10 since this
     // is the number of steps that we will do
     let external_inputs = vec![
-        vec![Fr::from(6u32), Fr::from(7u32)],
-        vec![Fr::from(8u32), Fr::from(9u32)],
-        vec![Fr::from(10u32), Fr::from(11u32)],
-        vec![Fr::from(12u32), Fr::from(13u32)],
-        vec![Fr::from(14u32), Fr::from(15u32)],
-        vec![Fr::from(6u32), Fr::from(7u32)],
-        vec![Fr::from(8u32), Fr::from(9u32)],
-        vec![Fr::from(10u32), Fr::from(11u32)],
-        vec![Fr::from(12u32), Fr::from(13u32)],
-        vec![Fr::from(14u32), Fr::from(15u32)],
+        vec![Fr::from(8u32), Fr::from(2u32)],
+        vec![Fr::from(40), Fr::from(5)],
     ];
 
-    // initialize the Circom circuit
-    let r1cs_path = PathBuf::from(
-        "./folding-schemes/src/frontend/circom/test_folder/with_external_inputs.r1cs",
-    );
-    let wasm_path = PathBuf::from(
-        "./folding-schemes/src/frontend/circom/test_folder/with_external_inputs_js/with_external_inputs.wasm",
-    );
+    // initialize the noname circuit
+    let f_circuit_params = (NONAME_CIRCUIT_EXTERNAL_INPUTS.to_owned(), 2, 2);
+    let f_circuit = NonameFCircuit::<Fr, R1csBn254Field>::new(f_circuit_params).unwrap();
 
-    let f_circuit_params = (r1cs_path, wasm_path, 1, 2);
-    let f_circuit = CircomFCircuit::<Fr>::new(f_circuit_params).unwrap();
-
-    pub type N = Nova<G1, GVar, G2, GVar2, CircomFCircuit<Fr>, KZG<'static, Bn254>, Pedersen<G2>>;
+    pub type N = Nova<
+        G1,
+        GVar,
+        G2,
+        GVar2,
+        NonameFCircuit<Fr, R1csBn254Field>,
+        KZG<'static, Bn254>,
+        Pedersen<G2>,
+    >;
     pub type D = DeciderEth<
         G1,
         GVar,
         G2,
         GVar2,
-        CircomFCircuit<Fr>,
+        NonameFCircuit<Fr, R1csBn254Field>,
         KZG<'static, Bn254>,
         Pedersen<G2>,
         Groth16<Bn254>,

@@ -5,6 +5,7 @@ use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 use ark_std::fmt::Debug;
 
 pub mod circom;
+pub mod noname;
 
 /// FCircuit defines the trait of the circuit of the F function, which is the one being folded (ie.
 /// inside the agmented F' function).
@@ -52,9 +53,7 @@ pub mod tests {
     use super::*;
     use ark_bn254::Fr;
     use ark_r1cs_std::{alloc::AllocVar, eq::EqGadget};
-    use ark_relations::r1cs::{
-        ConstraintSynthesizer, ConstraintSystem, ConstraintSystemRef, SynthesisError,
-    };
+    use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
     use core::marker::PhantomData;
 
     /// CubicFCircuit is a struct that implements the FCircuit trait, for the R1CS example circuit

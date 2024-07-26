@@ -3,10 +3,11 @@ use std::error::Error;
 use std::time::Duration;
 use ark_ff::{ PrimeField};
 use csv::Writer;
-use folding_schemes::ccs::r1cs::R1CS;
+use folding_schemes::arith::r1cs;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use num_bigint::BigUint;
 use rand::Rng;
+use folding_schemes::arith::r1cs::R1CS;
 
 fn create_large_diagonal_matrix<F: PrimeField>(power: usize) -> SparseMatrix<F> {
     let size = 1 << power;
@@ -82,16 +83,20 @@ pub fn to_F_vec<F: PrimeField>(z: Vec<BigUint>) -> Vec<F> {
 }
 
 pub fn write_to_csv(pows: &[usize], prove_times: &[Duration], file_path: String) -> Result<(), Box<dyn Error>> {
-    let path = env::current_dir()?.join("examples/multiple_inputs").join(file_path);
+    let path = env::current_dir()?.join("examples/folding_benchmarks").join(file_path);
     let mut writer = Writer::from_path(path)?;
 
     writer.write_record(&["pow", "prove_time"])?;
 
-    for (pow, prove_time) in pows.iter().zip(prove_times) {
-        writer.write_record(&[
-            pow.to_string(),
-            prove_time.as_micros().to_string(),
-        ])?;
+    let mut pows_cycle = pows.iter().cycle();
+
+    for prove_time in prove_times {
+        if let Some(pow) = pows_cycle.next() {
+            writer.write_record(&[
+                pow.to_string(),
+                prove_time.as_micros().to_string(),
+            ])?;
+        }
     }
 
     writer.flush()?;
