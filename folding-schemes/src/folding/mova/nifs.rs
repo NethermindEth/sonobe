@@ -3,7 +3,7 @@ use ark_ec::{CurveGroup, Group};
 use ark_ff::PrimeField;
 
 use ark_poly::MultilinearExtension;
-use ark_std::{log2, Zero};
+use ark_std::{log2};
 use std::marker::PhantomData;
 use std::time::Instant;
 
@@ -21,7 +21,6 @@ use crate::folding::mova::pointvsline::{
 };
 use crate::Error;
 
-/// Proof defines a multifolding proof
 pub struct Proof<C: CurveGroup> {
     pub hg_proof: PointVsLineProof<C>,
     pub mleE1_prime: C::ScalarField,
@@ -29,8 +28,6 @@ pub struct Proof<C: CurveGroup> {
     pub mleT: C::ScalarField,
 }
 
-/// Implements the Non-Interactive Folding Scheme described in section 4 of
-/// [Nova](https://eprint.iacr.org/2021/370.pdf)
 pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>> {
     _c: PhantomData<C>,
     _cp: PhantomData<CS>,
@@ -170,7 +167,6 @@ where
         let rho_scalar = C::ScalarField::from_le_bytes_mod_order(b"rho");
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
-        let _r2 = rho * rho;
 
         let elapsed = start.elapsed();
         println!("Time before start folding {:?}", elapsed);
@@ -199,8 +195,6 @@ where
         fold
     }
 
-    /// verify implements NIFS.V logic described in [Nova](https://eprint.iacr.org/2021/370.pdf)'s
-    /// section 4. It returns the folded Committed Instance
     pub fn verify(
         transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
@@ -233,49 +227,5 @@ where
             &proof.mleE2_prime,
             &proof.mleT,
         )
-    }
-
-    pub fn prove_expansion(
-        transcript: &mut impl Transcript<C::ScalarField>,
-        ci: &CommittedInstance<C>,
-        w: &Witness<C>,
-    ) -> Result<CommittedInstance<C>, Error> {
-        // accept only R1CS witness
-        if w.E.iter().any(|x| !x.is_zero()) {
-            return Err(Error::NotEqual);
-        }
-
-        let vars = log2(w.E.len()) as usize;
-
-        let rE_scalar = C::ScalarField::from_le_bytes_mod_order(b"rE");
-        transcript.absorb(&rE_scalar);
-        let rE: Vec<C::ScalarField> = transcript.get_challenges(vars);
-
-        Ok(CommittedInstance {
-            rE,
-            mleE: C::ScalarField::zero(),
-            u: ci.u,
-            cmW: ci.cmW,
-            x: ci.x.clone(),
-        })
-    }
-
-    // Do the verifier's expansion part.
-    pub fn verify_expansion(
-        transcript: &mut impl Transcript<C::ScalarField>,
-        ci: &CommittedInstance<C>,
-        n_vars_mleE: usize,
-    ) -> Result<CommittedInstance<C>, Error> {
-        let rE_scalar = C::ScalarField::from_le_bytes_mod_order(b"rE");
-        transcript.absorb(&rE_scalar);
-        let rE: Vec<C::ScalarField> = transcript.get_challenges(n_vars_mleE);
-
-        Ok(CommittedInstance {
-            rE,
-            mleE: C::ScalarField::zero(),
-            u: ci.u,
-            cmW: ci.cmW,
-            x: ci.x.clone(),
-        })
     }
 }
