@@ -7,7 +7,6 @@ use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::DenseMultilinearExtension;
 use ark_poly::DenseUVPolynomial;
-use ark_poly::MultilinearExtension;
 use ark_poly::Polynomial;
 use ark_std::log2;
 use ark_std::One;
@@ -18,7 +17,6 @@ use crate::folding::mova::Witness;
 use crate::transcript::Transcript;
 use crate::utils::mle::dense_vec_to_dense_mle;
 
-use crate::utils::sum_check::SumCheck;
 use crate::Error;
 
 pub struct PointvsLineEvaluationClaim<C: CurveGroup> {

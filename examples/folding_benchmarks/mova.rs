@@ -6,24 +6,19 @@ use folding_schemes::commitment::CommitmentScheme;
 use folding_schemes::folding::mova::nifs::NIFS;
 use folding_schemes::folding::mova::Witness;
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
-use folding_schemes::transcript::Transcript;
-use num_bigint::{BigUint, RandBigInt};
-use rand::Rng;
-use std::env;
 use std::mem::size_of_val;
 use std::time::{Duration, Instant};
 
 use crate::bench_utils::{get_test_r1cs, get_test_z, write_to_csv};
-use ark_ff::BigInteger;
 use folding_schemes::folding::mova::traits::MovaR1CS;
 
 use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
 use ark_crypto_primitives::sponge::CryptographicSponge;
 use folding_schemes::arith::r1cs::R1CS;
-use std::error::Error;
 
 mod bench_utils;
 
+#[allow(non_snake_case)]
 fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let size = 1 << power;
 
@@ -43,7 +38,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let vector = vec![1; size];
 
     // Populate error vector
-    witness_1.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+    witness_1.E = vector.into_iter().map(Fr::from).collect();
 
     // generate a random evaluation point for MLE
     let size_rE_1 = log2(size);
@@ -61,7 +56,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let vector = vec![2; size];
 
     // Populate error vector
-    witness_2.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+    witness_2.E = vector.into_iter().map(Fr::from).collect();
 
     let size_rE_2 = log2(size);
     let rE_2: Vec<_> = (0..size_rE_2).map(|_| Fr::rand(&mut rng)).collect();
@@ -112,7 +107,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
 fn main() {
     // let pows: Vec<usize> = (10..24).collect();
     let pows: Vec<usize> = vec![16, 20];
-    let iter = 10;
+    let iter = 1;
     let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len() * iter);
     for i in 0..iter {
         println!("starting {:}", i);
@@ -127,7 +122,7 @@ fn main() {
         println!("Powers {:?}", pows);
         println!("Prove times {:?}", prove_times);
     }
-    if let Err(e) = write_to_csv(&pows, &prove_times, format!("mova_prove_times.csv")) {
+    if let Err(e) = write_to_csv(&pows, &prove_times, "mova_prove_times.csv".to_string()) {
         eprintln!("Failed to write to CSV: {}", e);
     } else {
         println!("CSV file has been successfully written.");

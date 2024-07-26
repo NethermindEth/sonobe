@@ -1,11 +1,8 @@
 /// Implements the scheme described in [Nova](https://eprint.iacr.org/2021/370.pdf) and
 /// [CycleFold](https://eprint.iacr.org/2023/1192.pdf).
-use ark_crypto_primitives::{
-    crh::{ CRHScheme},
-    sponge::{ Absorb},
-};
+use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{AffineRepr, CurveGroup, Group};
-use ark_ff::{PrimeField, ToConstraintField};
+use ark_ff::PrimeField;
 use ark_poly::MultilinearExtension;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -54,7 +51,7 @@ impl<C: CurveGroup> Absorb for CommittedInstance<C>
 where
     C::ScalarField: Absorb,
 {
-    fn to_sponge_bytes(&self, dest: &mut Vec<u8>) {
+    fn to_sponge_bytes(&self, _dest: &mut Vec<u8>) {
         // This is never called
         unimplemented!()
     }

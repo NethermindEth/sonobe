@@ -65,7 +65,7 @@ contract NovaDecider is Groth16Verifier, KZG10Verifier {
         uint256[4] calldata U_i_cmW_U_i_cmE, // [U_i_cmW[2], U_i_cmE[2]]
         uint256[3] calldata U_i_u_u_i_u_r, // [U_i_u, u_i_u, r]
         uint256[4] calldata U_i_x_u_i_cmW, // [U_i_x[2], u_i_cmW[2]]
-        uint256[4] calldata u_i_x_cmT, // [u_i_x[2], cmT[2]]
+        uint256[4] calldata u_i_x_cmT, // [u_i_x[2], cm_t[2]]
         uint256[2] calldata pA, // groth16 
         uint256[2][2] calldata pB, // groth16
         uint256[2] calldata pC, // groth16
@@ -98,7 +98,7 @@ contract NovaDecider is Groth16Verifier, KZG10Verifier {
         }
 
         {
-            // U_i.cmE + r * u_i.cmT
+            // U_i.cmE + r * u_i.cm_t
             uint256[2] memory mulScalarPoint = super.mulScalar([u_i_x_cmT[2], u_i_x_cmT[3]], U_i_u_u_i_u_r[2]);
             uint256[2] memory cmE = super.add([U_i_cmW_U_i_cmE[2], U_i_cmW_U_i_cmE[3]], mulScalarPoint);
 

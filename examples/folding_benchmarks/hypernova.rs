@@ -1,14 +1,8 @@
 use crate::bench_utils::{get_test_r1cs, get_test_z, write_to_csv};
-use ark_ff::{BigInteger, Field, PrimeField};
 use ark_pallas::{Fr, Projective};
-use ark_std::{log2, UniformRand};
 use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::CommitmentScheme;
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
-use folding_schemes::transcript::Transcript;
-use folding_schemes::utils::sum_check::SumCheck;
-use rand::Rng;
-use std::mem::size_of_val;
 use std::time::{Duration, Instant};
 
 use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
@@ -16,14 +10,10 @@ use ark_crypto_primitives::sponge::CryptographicSponge;
 use folding_schemes::arith::ccs::CCS;
 use folding_schemes::arith::r1cs::R1CS;
 use folding_schemes::folding::hypernova::nimfs::NIMFS;
-use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
-use std::error::Error;
 
 mod bench_utils;
 
 fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
-    let size = 1 << power;
-
     let r1cs: R1CS<Fr> = get_test_r1cs(power);
     let mut rng = ark_std::test_rng();
     let ccs = CCS::<Fr>::from_r1cs(r1cs);
@@ -45,7 +35,7 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
 
     let start = Instant::now();
 
-    let (proof, folded_lcccs, folded_witness, _) = NIMFS::<Projective, PoseidonSponge<Fr>>::prove(
+    let _proof = NIMFS::<Projective, PoseidonSponge<Fr>>::prove(
         &mut transcript_p,
         &ccs,
         &[running_instance.clone()],
@@ -80,7 +70,7 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
 fn main() {
     // let pows: Vec<usize> = (10..24).collect();
     let pows: Vec<usize> = vec![16, 20];
-    let iter = 10;
+    let iter = 1;
     let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len() * iter);
     for i in 0..iter {
         println!("starting {:}", i);
@@ -95,7 +85,7 @@ fn main() {
         println!("Powers {:?}", pows);
         println!("Prove times {:?}", prove_times);
     }
-    if let Err(e) = write_to_csv(&pows, &prove_times, format!("hypernova_prove_times.csv")) {
+    if let Err(e) = write_to_csv(&pows, &prove_times, "hypernova_prove_times.csv".to_string()) {
         eprintln!("Failed to write to CSV: {}", e);
     } else {
         println!("CSV file has been successfully written.");
