@@ -1,11 +1,8 @@
 /// Implements the scheme described in [Nova](https://eprint.iacr.org/2021/370.pdf) and
 /// [CycleFold](https://eprint.iacr.org/2023/1192.pdf).
-use ark_crypto_primitives::{
-    crh::{poseidon::CRH, CRHScheme},
-    sponge::{poseidon::PoseidonConfig, Absorb},
-};
+use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{AffineRepr, CurveGroup, Group};
-use ark_ff::{PrimeField, ToConstraintField};
+use ark_ff::PrimeField;
 use ark_poly::MultilinearExtension;
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -16,14 +13,14 @@ use std::usize;
 
 use crate::commitment::CommitmentScheme;
 
+use crate::transcript::{AbsorbNonNative, Transcript};
 use crate::utils::vec::is_zero_vec;
 use crate::Error;
-use crate::transcript::{AbsorbNonNative, Transcript};
 
 use crate::utils::mle::dense_vec_to_dense_mle;
 
-pub mod pointvsline;
 pub mod nifs;
+pub mod pointvsline;
 pub mod traits;
 pub mod utils;
 
@@ -51,10 +48,10 @@ impl<C: CurveGroup> CommittedInstance<C> {
 }
 
 impl<C: CurveGroup> Absorb for CommittedInstance<C>
-    where
-        C::ScalarField: Absorb,
+where
+    C::ScalarField: Absorb,
 {
-    fn to_sponge_bytes(&self, dest: &mut Vec<u8>) {
+    fn to_sponge_bytes(&self, _dest: &mut Vec<u8>) {
         // This is never called
         unimplemented!()
     }
@@ -69,8 +66,8 @@ impl<C: CurveGroup> Absorb for CommittedInstance<C>
 }
 
 impl<C: CurveGroup> AbsorbNonNative<C::BaseField> for CommittedInstance<C>
-    where
-        <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField + Absorb,
+where
+    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField + Absorb,
 {
     fn to_native_sponge_field_elements(&self, dest: &mut Vec<C::BaseField>) {
         self.rE.to_native_sponge_field_elements(dest);
@@ -88,9 +85,9 @@ impl<C: CurveGroup> AbsorbNonNative<C::BaseField> for CommittedInstance<C>
 }
 
 impl<C: CurveGroup> CommittedInstance<C>
-    where
-        <C as Group>::ScalarField: Absorb,
-        <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField,
+where
+    <C as Group>::ScalarField: Absorb,
+    <C as ark_ec::CurveGroup>::BaseField: ark_ff::PrimeField,
 {
     /// hash implements the committed instance hash compatible with the gadget implemented in
     /// nova/circuits.rs::CommittedInstanceVar.hash.
@@ -113,8 +110,6 @@ impl<C: CurveGroup> CommittedInstance<C>
         sponge.squeeze_field_elements(1)[0]
     }
 }
-
-
 
 #[derive(Debug, Clone, Eq, PartialEq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Witness<C: CurveGroup> {
@@ -166,4 +161,3 @@ where
         })
     }
 }
-
