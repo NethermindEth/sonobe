@@ -24,18 +24,13 @@ mod bench_utils;
 fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
     let size = 1 << power;
 
-    // let r1cs = get_test_r1cs_2();
     let r1cs: R1CS<Fr> = get_test_r1cs(power);
     let mut rng = ark_std::test_rng();
     let ccs = CCS::<Fr>::from_r1cs(r1cs);
     let (pedersen_params, _) =
         Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
-    // Generate a satisfying witness
     let z_1 = get_test_z(power);
-    // let z_1 = get_test_z_2(3);
-    // Generate another satisfying witness
     let z_2 = get_test_z(power);
-    // let z_2 = get_test_z_2(4);
 
 
     let (running_instance, w1) = ccs
@@ -69,7 +64,7 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
     let prove_time = start.elapsed();
     prove_times.push(prove_time);
     println!(
-        "Mova prove time {:?}",
+        "Hypernova prove time {:?}",
         prove_time
     );
 

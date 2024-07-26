@@ -83,7 +83,7 @@ pub fn to_F_vec<F: PrimeField>(z: Vec<BigUint>) -> Vec<F> {
 }
 
 pub fn write_to_csv(pows: &[usize], prove_times: &[Duration], file_path: String) -> Result<(), Box<dyn Error>> {
-    let path = env::current_dir()?.join("examples/multiple_inputs").join(file_path);
+    let path = env::current_dir()?.join("").join(file_path);
     let mut writer = Writer::from_path(path)?;
 
     writer.write_record(&["pow", "prove_time"])?;

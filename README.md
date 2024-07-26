@@ -1,3 +1,11 @@
+# Benchmarks
+
+To run the benchmarks use
+
+`cargo run --release --example <folding>`
+
+**Folding options:** mova, nova, hp
+
 # sonobe
 
 Experimental folding schemes library implemented jointly by [0xPARC](https://0xparc.org/) and [PSE](https://pse.dev).

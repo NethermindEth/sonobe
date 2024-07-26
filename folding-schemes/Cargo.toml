@@ -70,12 +70,12 @@ path = "../examples/external_inputs.rs"
 
 [[example]]
 name = "hp"
-path = "../examples/multiple_inputs/hypernova.rs"
+path = "../examples/folding_benchmarks/hypernova.rs"
 
 [[example]]
-name = "nova-multi-inputs"
-path = "../examples/multiple_inputs/nova.rs"
+name = "nova"
+path = "../examples/folding_benchmarks/nova.rs"
 
 [[example]]
-name = "mova-multi-inputs"
-path = "../examples/multiple_inputs/mova.rs"
+name = "mova"
+path = "../examples/folding_benchmarks/mova.rs"
