@@ -16,11 +16,13 @@ use crate::utils::mle::dense_vec_to_dense_mle;
 
 use crate::utils::vec::{hadamard, mat_vec_mul, vec_add, vec_scalar_mul, vec_sub};
 
+use crate::folding::mova::pointvsline::{
+    PointVsLine, PointVsLineProof, PointvsLineEvaluationClaim,
+};
 use crate::Error;
-use crate::folding::mova::pointvsline::{PointVsLine, PointvsLineEvaluationClaim, PointVsLineProof};
 
 /// Proof defines a multifolding proof
-pub struct Proof<C: CurveGroup, > {
+pub struct Proof<C: CurveGroup> {
     pub hg_proof: PointVsLineProof<C>,
     pub mleE1_prime: C::ScalarField,
     pub mleE2_prime: C::ScalarField,
@@ -29,16 +31,15 @@ pub struct Proof<C: CurveGroup, > {
 
 /// Implements the Non-Interactive Folding Scheme described in section 4 of
 /// [Nova](https://eprint.iacr.org/2021/370.pdf)
-pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, > {
+pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>> {
     _c: PhantomData<C>,
     _cp: PhantomData<CS>,
     _ct: PhantomData<T>,
 }
 
-impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, >
-NIFS<C, CS, T>
-    where
-        <C as Group>::ScalarField: Absorb,
+impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>> NIFS<C, CS, T>
+where
+    <C as Group>::ScalarField: Absorb,
 {
     // compute_T: compute cross-terms T
     pub fn compute_T(
@@ -136,7 +137,6 @@ NIFS<C, CS, T>
         let elapsed = start.elapsed();
         println!("Time after homogenization point-vs-line {:?}", elapsed);
 
-
         transcript.absorb(&mleE1_prime);
         transcript.absorb(&mleE2_prime);
 
@@ -150,7 +150,6 @@ NIFS<C, CS, T>
 
         let elapsed = start.elapsed();
         println!("Time after computing T {:?}", elapsed);
-
 
         let vars = log2(w1.E.len()) as usize;
 
@@ -206,7 +205,7 @@ NIFS<C, CS, T>
         transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
-        proof: &Proof<C,>
+        proof: &Proof<C>,
     ) -> Result<CommittedInstance<C>, Error> {
         let rE_prime = PointVsLine::<C, T>::verify(
             transcript,

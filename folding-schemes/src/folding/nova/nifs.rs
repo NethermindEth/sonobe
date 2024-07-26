@@ -7,9 +7,9 @@ use ark_std::Zero;
 
 use crate::arith::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
-use crate::Error;
 use crate::transcript::Transcript;
 use crate::utils::vec::{hadamard, mat_vec_mul, vec_add, vec_scalar_mul, vec_sub};
+use crate::Error;
 
 use super::{CommittedInstance, Witness};
 
@@ -111,12 +111,12 @@ where
         let elapsed = start.elapsed();
         println!("Time after computing T {:?}", elapsed);
         let elapsed = start.elapsed();
-        println!("Time before commiting T {:?}", elapsed);
+        println!("Time before committing T {:?}", elapsed);
 
         // use r_T=0 since we don't need hiding property for cm(T)
         let cmT = CS::commit(cs_prover_params, &T, &C::ScalarField::zero())?;
         let elapsed = start.elapsed();
-        println!("Time after commiting T {:?}", elapsed);
+        println!("Time after committing T {:?}", elapsed);
 
         Ok((T, cmT))
     }
@@ -214,8 +214,8 @@ where
 #[cfg(test)]
 pub mod tests {
     use ark_crypto_primitives::sponge::{
-        CryptographicSponge,
         poseidon::{PoseidonConfig, PoseidonSponge},
+        CryptographicSponge,
     };
     use ark_ff::{BigInteger, PrimeField};
     use ark_pallas::{Fr, Projective};

@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::time::Instant;
 
 use ark_crypto_primitives::sponge::Absorb;
@@ -14,18 +13,13 @@ use ark_std::log2;
 use ark_std::One;
 use ark_std::Zero;
 
-use crate::folding::mova::utils::compute_c;
-use crate::folding::mova::utils::compute_g;
 use crate::folding::mova::CommittedInstance;
 use crate::folding::mova::Witness;
 use crate::transcript::Transcript;
 use crate::utils::mle::dense_vec_to_dense_mle;
-use crate::utils::sum_check::structs::IOPProof as SumCheckProof;
-use crate::utils::sum_check::IOPSumCheck;
-use crate::utils::sum_check::SumCheck;
-use crate::utils::virtual_polynomial::VPAuxInfo;
-use crate::Error;
 
+use crate::utils::sum_check::SumCheck;
+use crate::Error;
 
 pub struct PointvsLineEvaluationClaim<C: CurveGroup> {
     pub mleE1_prime: C::ScalarField,
@@ -46,7 +40,7 @@ pub struct PointVsLine<C: CurveGroup, T: Transcript<C::ScalarField>> {
 }
 
 impl<C: CurveGroup, T: Transcript<C::ScalarField>> PointVsLine<C, T>
-    where
+where
     <C as Group>::ScalarField: Absorb,
 {
     pub fn prove(
@@ -134,7 +128,6 @@ impl<C: CurveGroup, T: Transcript<C::ScalarField>> PointVsLine<C, T>
 
         Ok(rE_prime)
     }
-
 }
 
 // TODO: Test this.

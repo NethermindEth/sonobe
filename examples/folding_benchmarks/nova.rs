@@ -1,5 +1,5 @@
 use crate::bench_utils::{get_test_r1cs, get_test_z, write_to_csv};
-use ark_ff::{ BigInteger, Field, PrimeField};
+use ark_ff::{BigInteger, Field, PrimeField};
 use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
 use folding_schemes::commitment::pedersen::Pedersen;
@@ -7,17 +7,17 @@ use folding_schemes::commitment::CommitmentScheme;
 use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
 use folding_schemes::folding::nova::Witness;
-use folding_schemes::transcript::poseidon::{poseidon_canonical_config};
+use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::transcript::Transcript;
-use folding_schemes::utils::sum_check::{ SumCheck};
+use folding_schemes::utils::sum_check::SumCheck;
 use rand::Rng;
 use std::mem::size_of_val;
 use std::time::{Duration, Instant};
 
-use std::error::Error;
-use ark_crypto_primitives::sponge::CryptographicSponge;
 use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
+use ark_crypto_primitives::sponge::CryptographicSponge;
 use ark_ec::CurveGroup;
+use std::error::Error;
 
 mod bench_utils;
 
@@ -26,7 +26,7 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
 
     let r1cs = get_test_r1cs(power);
 
-    let z_1 = get_test_z( power);
+    let z_1 = get_test_z(power);
 
     let (w, x) = r1cs.split_z(&z_1);
 
@@ -65,7 +65,7 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &witness_2,
         &incoming_committed_instance,
     )
-        .unwrap();
+    .unwrap();
 
     let elapsed = start.elapsed();
     println!("Time before Randomness generation {:?}", elapsed);
@@ -87,7 +87,7 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &T,
         cmT,
     )
-        .unwrap();
+    .unwrap();
     let elapsed = start.elapsed();
 
     println!("Time after folding {:?}", elapsed);
@@ -112,7 +112,6 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     }
 }
 
-
 fn main() {
     // let pows: Vec<usize> = (10..24).collect();
     let pows: Vec<usize> = vec![16, 20];
@@ -121,11 +120,7 @@ fn main() {
     for i in 0..iter {
         println!("starting {:}", i);
 
-
-
         println!("{:?}", pows);
-
-
 
         for pow in &pows {
             println!("{}", pow);
@@ -140,5 +135,4 @@ fn main() {
     } else {
         println!("CSV file has been successfully written.");
     }
-
 }

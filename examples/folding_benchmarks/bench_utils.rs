@@ -1,13 +1,13 @@
-use std::env;
-use std::error::Error;
-use std::time::Duration;
-use ark_ff::{ PrimeField};
+use ark_ff::PrimeField;
 use csv::Writer;
 use folding_schemes::arith::r1cs;
+use folding_schemes::arith::r1cs::R1CS;
 use folding_schemes::utils::vec::{dense_matrix_to_sparse, SparseMatrix};
 use num_bigint::BigUint;
 use rand::Rng;
-use folding_schemes::arith::r1cs::R1CS;
+use std::env;
+use std::error::Error;
+use std::time::Duration;
 
 fn create_large_diagonal_matrix<F: PrimeField>(power: usize) -> SparseMatrix<F> {
     let size = 1 << power;
@@ -22,7 +22,7 @@ fn create_large_diagonal_matrix<F: PrimeField>(power: usize) -> SparseMatrix<F> 
     SparseMatrix {
         n_rows: size,
         n_cols: size,
-        coeffs
+        coeffs,
     }
 }
 
@@ -37,8 +37,7 @@ pub fn get_test_r1cs<F: PrimeField>(power: usize) -> R1CS<F> {
 }
 
 pub fn get_test_z<F: PrimeField>(power: usize) -> Vec<F> {
-
-    let z_vec = create_random_biguints(1<< power, 384);
+    let z_vec = create_random_biguints(1 << power, 384);
     to_F_vec(z_vec)
 }
 
@@ -76,14 +75,20 @@ pub fn to_F_vec<F: PrimeField>(z: Vec<BigUint>) -> Vec<F> {
         // Convert each BigUint to F::BigInt
         match F::try_from(bigint) {
             Ok(f_bigint) => result.push(f_bigint),
-            Err(e) => eprintln!("Error converting bigint: {:?}", e)
+            Err(e) => eprintln!("Error converting bigint: {:?}", e),
         }
     }
     result
 }
 
-pub fn write_to_csv(pows: &[usize], prove_times: &[Duration], file_path: String) -> Result<(), Box<dyn Error>> {
-    let path = env::current_dir()?.join("examples/folding_benchmarks").join(file_path);
+pub fn write_to_csv(
+    pows: &[usize],
+    prove_times: &[Duration],
+    file_path: String,
+) -> Result<(), Box<dyn Error>> {
+    let path = env::current_dir()?
+        .join("examples/folding_benchmarks")
+        .join(file_path);
     let mut writer = Writer::from_path(path)?;
 
     writer.write_record(&["pow", "prove_time"])?;
@@ -92,10 +97,7 @@ pub fn write_to_csv(pows: &[usize], prove_times: &[Duration], file_path: String)
 
     for prove_time in prove_times {
         if let Some(pow) = pows_cycle.next() {
-            writer.write_record(&[
-                pow.to_string(),
-                prove_time.as_micros().to_string(),
-            ])?;
+            writer.write_record(&[pow.to_string(), prove_time.as_micros().to_string()])?;
         }
     }
 
