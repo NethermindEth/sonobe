@@ -38,15 +38,18 @@ where
 
     let vars = log2(w1.E.len()) as usize;
 
-    let mut g = VirtualPolynomial::<C::ScalarField>::new(vars);
 
+    let mut g = VirtualPolynomial::<C::ScalarField>::new(vars);
     let eq_rE1 = build_eq_x_r_vec(&ci1.rE)?;
     let eq_rE2 = build_eq_x_r_vec(&ci2.rE)?;
+
     let eq_rE1_mle = dense_vec_to_dense_mle(vars, &eq_rE1);
     let eq_rE2_mle = dense_vec_to_dense_mle(vars, &eq_rE2);
 
+
     let mleE1 = dense_vec_to_dense_mle(log2(w1.E.len()) as usize, &w1.E);
     let mleE2 = dense_vec_to_dense_mle(log2(w2.E.len()) as usize, &w2.E);
+
 
     g.add_mle_list(
         [Arc::new(mleE1.clone()), Arc::new(eq_rE1_mle.clone())],

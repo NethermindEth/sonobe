@@ -1,7 +1,8 @@
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
-use ark_std::Zero;
+use ark_std::{ Zero};
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use super::{CommittedInstance, Witness};
 use crate::ccs::r1cs::R1CS;
@@ -97,13 +98,25 @@ where
         w2: &Witness<C>,
         ci2: &CommittedInstance<C>,
     ) -> Result<(Vec<C::ScalarField>, C), Error> {
+        println!("Nova Point 0: nifs.compute_cmT - Starting ");
+        let start = Instant::now();
+
         let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
         let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
 
+        println!("Nova Point 1 nifs.compute_cmT {:?} - Z concatenations", start.elapsed());
+
+
         // compute cross terms
+
         let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
+        println!("Nova Point 2 nifs.compute_cmT {:?} - Computed T", start.elapsed());
+
+
         // use r_T=0 since we don't need hiding property for cm(T)
         let cmT = CS::commit(cs_prover_params, &T, &C::ScalarField::zero())?;
+        println!("Nova Point 3 nifs.compute_cmT {:?} - Committed T", start.elapsed());
+
         Ok((T, cmT))
     }
     pub fn compute_cyclefold_cmT(

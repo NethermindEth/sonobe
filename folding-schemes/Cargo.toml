@@ -23,9 +23,11 @@ num-integer = "0.1"
 color-eyre = "=0.6.2"
 ark-bn254 = {version="0.4.0"}
 ark-groth16 = { version = "^0.4.0" }
+csv = "1.1"
 
 # tmp imports for espresso's sumcheck
 espresso_subroutines = {git="https://github.com/EspressoSystems/hyperplonk", package="subroutines"}
+num-traits = "0.2.15"
 
 [dev-dependencies]
 ark-pallas = {version="0.4.0", features=["r1cs"]}
@@ -64,5 +66,17 @@ name = "external_inputs"
 path = "../examples/external_inputs.rs"
 
 [[example]]
+name = "mova"
+path = "../examples/mova.rs"
+
+[[example]]
 name = "nova"
 path = "../examples/nova.rs"
+
+[[example]]
+name = "mova-multi-inputs"
+path = "../examples/multiple_inputs/mova.rs"
+
+[[example]]
+name = "nova-multi-inputs"
+path = "../examples/multiple_inputs/nova.rs"

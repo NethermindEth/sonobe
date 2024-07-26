@@ -1,4 +1,4 @@
-use crate::bench_utils::{get_test_r1cs, get_test_z_albert};
+use crate::bench_utils::{get_test_r1cs, get_test_z, write_to_csv};
 use ark_ff::{ BigInteger, Field, PrimeField};
 use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
@@ -10,58 +10,58 @@ use folding_schemes::folding::nova::Witness;
 use folding_schemes::transcript::poseidon::{poseidon_canonical_config, PoseidonTranscript};
 use folding_schemes::transcript::Transcript;
 use folding_schemes::utils::sum_check::{ SumCheck};
-use num_bigint::BigUint;
 use num_traits::{One, Zero};
 use rand::Rng;
 use std::mem::size_of_val;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use std::error::Error;
+use csv::Writer;
 
 mod bench_utils;
 
-fn main() {
-    println!("starting");
+fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
+    let size = 1 << power;
 
-    let big_num = BigUint::one() << 100;
-    let r1cs = get_test_r1cs();
+    let r1cs = get_test_r1cs(power);
 
-    let z = get_test_z_albert(big_num);
+    let z_1 = get_test_z( power);
 
-    let (w, x) = r1cs.split_z(&z);
+    let (w, x) = r1cs.split_z(&z_1);
 
     let mut rng = ark_std::test_rng();
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, r1cs.A.n_cols).unwrap();
 
-    let running_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
-    let running_committed_instance = running_instance_w
+    let mut witness_1 = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
+    let running_committed_instance = witness_1
         .commit::<Pedersen<Projective>>(&pedersen_params, x)
         .unwrap();
 
-    let four = BigUint::one() + BigUint::one() + BigUint::one() + BigUint::one();
-    let incoming_instance_z = get_test_z_albert(four);
-    let (w, x) = r1cs.split_z(&incoming_instance_z);
-    let incoming_instance_w = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
-    let incoming_committed_instance = incoming_instance_w
+    let z_2 = get_test_z(power);
+    let (w, x) = r1cs.split_z(&z_2);
+    let mut witness_2 = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
+    let incoming_committed_instance = witness_2
         .commit::<Pedersen<Projective>>(&pedersen_params, x)
         .unwrap();
 
     let poseidon_config = poseidon_canonical_config::<ark_pallas::Fr>();
     let mut transcript_p = PoseidonTranscript::<Projective>::new(&poseidon_config);
-    // let vector = vec![1; size];
-    // //
-    // witness_1.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+    let vector = vec![1; size];
     //
-    // let vector = vec![2; size];
-    // //
-    // witness_2.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+    witness_1.E = vector.into_iter().map(|x| Fr::from(x)).collect();
+
+    let vector = vec![2; size];
+    //
+    witness_2.E = vector.into_iter().map(|x| Fr::from(x)).collect();
     // NIFS.P
     let start = Instant::now();
 
     let (T, cmT) = NIFS::<Projective, Pedersen<Projective>>::compute_cmT(
         &pedersen_params,
         &r1cs,
-        &running_instance_w,
+        &witness_1,
         &running_committed_instance,
-        &incoming_instance_w,
+        &witness_2,
         &incoming_committed_instance,
     )
     .unwrap();
@@ -78,16 +78,18 @@ fn main() {
     let r = transcript_p.get_challenge();
     let result = NIFS::<Projective, Pedersen<Projective>>::fold_instances(
         r,
-        &running_instance_w,
+        &witness_1,
         &running_committed_instance,
-        &incoming_instance_w,
+        &witness_2,
         &incoming_committed_instance,
         &T,
         cmT,
     )
     .unwrap();
 
-    println!("Nova prove time {:?}", start.elapsed());
+    let prove_time = start.elapsed();
+    prove_times.push(prove_time);
+    println!("Nova prove time {:?}", prove_time);
     println!("Nova bytes used {:?}", size_of_val(&result));
 
     let (folded_w, _) = result;
@@ -103,4 +105,39 @@ fn main() {
         Ok(_) => println!("The relation check was successful."),
         Err(e) => println!("The relation check failed: {:?}", e),
     }
+}
+
+
+fn main() {
+    println!("starting");
+
+    let pows: Vec<usize> = (10..24).collect();
+    println!("{:?}", pows);
+
+    let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());
+
+    for pow in &pows {
+        println!("{}", pow);
+        nova_benchmark(*pow, &mut prove_times);
+    }
+
+    println!("Powers {:?}", pows);
+
+    println!("Prove times {:?}", prove_times);
+
+    println!(
+        "| {0: <10} | {1: <10} |",
+        "2^pow", "prove time"
+    );
+    println!("| {0: <10} | {1: <10} |", "2^pow", "prove time");
+    for (pow, prove_time) in pows.iter().zip(prove_times.iter()) {
+        println!("| {0: <10} | {1:?} |", pow, prove_time);
+    }
+
+    if let Err(e) = write_to_csv(&pows, &prove_times, String::from("nova_prove_times.csv")) {
+        eprintln!("Failed to write to CSV: {}", e);
+    } else {
+        println!("CSV file has been successfully written.");
+    }
+    
 }
