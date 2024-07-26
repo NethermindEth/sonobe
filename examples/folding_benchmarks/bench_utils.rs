@@ -83,16 +83,20 @@ pub fn to_F_vec<F: PrimeField>(z: Vec<BigUint>) -> Vec<F> {
 }
 
 pub fn write_to_csv(pows: &[usize], prove_times: &[Duration], file_path: String) -> Result<(), Box<dyn Error>> {
-    let path = env::current_dir()?.join("").join(file_path);
+    let path = env::current_dir()?.join("examples/folding_benchmarks").join(file_path);
     let mut writer = Writer::from_path(path)?;
 
     writer.write_record(&["pow", "prove_time"])?;
 
-    for (pow, prove_time) in pows.iter().zip(prove_times) {
-        writer.write_record(&[
-            pow.to_string(),
-            prove_time.as_micros().to_string(),
-        ])?;
+    let mut pows_cycle = pows.iter().cycle();
+
+    for prove_time in prove_times {
+        if let Some(pow) = pows_cycle.next() {
+            writer.write_record(&[
+                pow.to_string(),
+                prove_time.as_micros().to_string(),
+            ])?;
+        }
     }
 
     writer.flush()?;

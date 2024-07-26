@@ -4,7 +4,6 @@ use ark_std::log2;
 use ark_std::UniformRand;
 use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::CommitmentScheme;
-use folding_schemes::folding::mova::homogenization::{Homogenization, PointVsLineHomogenization};
 use folding_schemes::folding::mova::nifs::NIFS;
 use folding_schemes::folding::mova::Witness;
 use folding_schemes::transcript::poseidon::{poseidon_canonical_config};
@@ -78,7 +77,6 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         Projective,
         Pedersen<Projective>,
         PoseidonSponge<Fr>,
-        PointVsLineHomogenization<Projective, PoseidonSponge<Fr>>
     >::prove(
         &pedersen_params,
         &r1cs,
@@ -107,7 +105,6 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         Projective,
         Pedersen<Projective>,
         PoseidonSponge<Fr>,
-        PointVsLineHomogenization<Projective, PoseidonSponge<Fr>>
     >::verify(
         &mut transcript_v,
         &committed_instance_1,
@@ -125,30 +122,28 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
 
 
 fn main() {
-  
-
-    println!("starting");
-
     // let pows: Vec<usize> = (10..24).collect();
     let pows: Vec<usize> = vec![16, 20];
+    let iter = 10;
+    let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len() * iter);
+    for i in 0..iter {
+        println!("starting {:}", i);
 
-    println!("{:?}", pows);
 
-    let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());
 
-    for pow in &pows {
-        println!("{}", pow);
-        mova_benchmark(*pow, &mut prove_times);
+        println!("{:?}", pows);
+
+
+
+        for pow in &pows {
+            println!("{}", pow);
+            mova_benchmark(*pow, &mut prove_times);
+        }
+
+        println!("Powers {:?}", pows);
+        println!("Prove times {:?}", prove_times);
+
     }
-
-    println!("Powers {:?}", pows);
-    println!("Prove times {:?}", prove_times);
-
-    println!("| {0: <10} | {1: <10} |", "2^pow", "prove time");
-    for (pow, prove_time) in pows.iter().zip(prove_times.iter()) {
-        println!("| {0: <10} | {1:?} |", pow, prove_time);
-    }
-
     if let Err(e) = write_to_csv(&pows, &prove_times, format!("mova_prove_times.csv")) {
         eprintln!("Failed to write to CSV: {}", e);
     } else {

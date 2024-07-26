@@ -26,34 +26,11 @@ use crate::utils::sum_check::SumCheck;
 use crate::utils::virtual_polynomial::VPAuxInfo;
 use crate::Error;
 
-pub struct HomogeneousEvaluationClaim<C: CurveGroup> {
+
+pub struct PointvsLineEvaluationClaim<C: CurveGroup> {
     pub mleE1_prime: C::ScalarField,
     pub mleE2_prime: C::ScalarField,
     pub rE_prime: Vec<C::ScalarField>,
-}
-
-pub trait Homogenization<C: CurveGroup, T: Transcript<C::ScalarField>> {
-    type Proof: Clone + Debug;
-
-    fn prove(
-        transcript: &mut impl Transcript<C::ScalarField>,
-        ci1: &CommittedInstance<C>,
-        ci2: &CommittedInstance<C>,
-        w1: &Witness<C>,
-        w2: &Witness<C>,
-    ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error>;
-
-    fn verify(
-        transcript: &mut impl Transcript<C::ScalarField>,
-        ci1: &CommittedInstance<C>,
-        ci2: &CommittedInstance<C>,
-        proof: &Self::Proof,
-        mleE1_prime: &C::ScalarField,
-        mleE2_prime: &C::ScalarField,
-    ) -> Result<
-        Vec<C::ScalarField>, // rE=rE1'=rE2'.
-        Error,
-    >;
 }
 
 #[derive(Clone, Debug)]
@@ -63,24 +40,22 @@ pub struct PointVsLineProof<C: CurveGroup> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PointVsLineHomogenization<C: CurveGroup, T: Transcript<C::ScalarField>> {
+pub struct PointVsLine<C: CurveGroup, T: Transcript<C::ScalarField>> {
     _phantom_C: std::marker::PhantomData<C>,
     _phantom_T: std::marker::PhantomData<T>,
 }
 
-impl<C: CurveGroup, T: Transcript<C::ScalarField>> Homogenization<C, T> for PointVsLineHomogenization<C, T>
-where
+impl<C: CurveGroup, T: Transcript<C::ScalarField>> PointVsLine<C, T>
+    where
     <C as Group>::ScalarField: Absorb,
 {
-    type Proof = PointVsLineProof<C>;
-
-    fn prove(
+    pub fn prove(
         transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<(Self::Proof, HomogeneousEvaluationClaim<C>), Error> {
+    ) -> Result<(PointVsLineProof<C>, PointvsLineEvaluationClaim<C>), Error> {
         let vars = log2(w1.E.len()) as usize;
 
         let mleE1 = dense_vec_to_dense_mle(vars, &w1.E);
@@ -112,8 +87,8 @@ where
         let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
 
         Ok((
-            Self::Proof { h1, h2 },
-            HomogeneousEvaluationClaim {
+            PointVsLineProof { h1, h2 },
+            PointvsLineEvaluationClaim {
                 mleE1_prime,
                 mleE2_prime,
                 rE_prime,
@@ -121,11 +96,11 @@ where
         ))
     }
 
-    fn verify(
+    pub fn verify(
         transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
-        proof: &Self::Proof,
+        proof: &PointVsLineProof<C>,
         mleE1_prime: &<C>::ScalarField,
         mleE2_prime: &<C>::ScalarField,
     ) -> Result<
@@ -159,6 +134,7 @@ where
 
         Ok(rE_prime)
     }
+
 }
 
 // TODO: Test this.

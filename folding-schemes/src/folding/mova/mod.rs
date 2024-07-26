@@ -22,7 +22,7 @@ use crate::transcript::{AbsorbNonNative, Transcript};
 
 use crate::utils::mle::dense_vec_to_dense_mle;
 
-pub mod homogenization;
+pub mod pointvsline;
 pub mod nifs;
 pub mod traits;
 pub mod utils;

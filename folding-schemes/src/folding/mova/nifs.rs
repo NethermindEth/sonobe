@@ -7,8 +7,6 @@ use ark_std::{log2, Zero};
 use std::marker::PhantomData;
 use std::time::Instant;
 
-use super::homogenization::{HomogeneousEvaluationClaim, Homogenization};
-
 use super::{CommittedInstance, InstanceWitness, Witness};
 use crate::arith::r1cs::R1CS;
 use crate::commitment::CommitmentScheme;
@@ -19,11 +17,11 @@ use crate::utils::mle::dense_vec_to_dense_mle;
 use crate::utils::vec::{hadamard, mat_vec_mul, vec_add, vec_scalar_mul, vec_sub};
 
 use crate::Error;
+use crate::folding::mova::pointvsline::{PointVsLine, PointvsLineEvaluationClaim, PointVsLineProof};
 
 /// Proof defines a multifolding proof
-#[derive(Clone, Debug)]
-pub struct Proof<C: CurveGroup, T: Transcript<C::ScalarField>, H: Homogenization<C, T>> {
-    pub hg_proof: H::Proof,
+pub struct Proof<C: CurveGroup, > {
+    pub hg_proof: PointVsLineProof<C>,
     pub mleE1_prime: C::ScalarField,
     pub mleE2_prime: C::ScalarField,
     pub mleT: C::ScalarField,
@@ -31,15 +29,14 @@ pub struct Proof<C: CurveGroup, T: Transcript<C::ScalarField>, H: Homogenization
 
 /// Implements the Non-Interactive Folding Scheme described in section 4 of
 /// [Nova](https://eprint.iacr.org/2021/370.pdf)
-pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, H: Homogenization<C, T>> {
+pub struct NIFS<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, > {
     _c: PhantomData<C>,
     _cp: PhantomData<CS>,
     _ct: PhantomData<T>,
-    _ch: PhantomData<H>,
 }
 
-impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, H: Homogenization<C, T>>
-NIFS<C, CS, T, H>
+impl<C: CurveGroup, CS: CommitmentScheme<C>, T: Transcript<C::ScalarField>, >
+NIFS<C, CS, T>
     where
         <C as Group>::ScalarField: Absorb,
 {
@@ -86,7 +83,7 @@ NIFS<C, CS, T, H>
         Ok(Witness::<C> { E, W, rW })
     }
 
-    pub fn fold_homogenized_committed_instance(
+    pub fn fold_committed_instance(
         rho: C::ScalarField,
         ci1: &CommittedInstance<C>, // U_i
         ci2: &CommittedInstance<C>, // u_i
@@ -115,27 +112,6 @@ NIFS<C, CS, T, H>
         })
     }
 
-    /// NIFS.P is the consecutive combination of compute_cmT with fold_instances
-
-    /// compute_cmT is part of the NIFS.P logic
-    pub fn compute_cmT(
-        cs_prover_params: &CS::ProverParams,
-        r1cs: &R1CS<C::ScalarField>,
-        w1: &Witness<C>,
-        ci1: &CommittedInstance<C>,
-        w2: &Witness<C>,
-        ci2: &CommittedInstance<C>,
-    ) -> Result<(Vec<C::ScalarField>, C), Error> {
-        let z1: Vec<C::ScalarField> = [vec![ci1.u], ci1.x.to_vec(), w1.W.to_vec()].concat();
-        let z2: Vec<C::ScalarField> = [vec![ci2.u], ci2.x.to_vec(), w2.W.to_vec()].concat();
-
-        // compute cross terms
-        let T = Self::compute_T(r1cs, ci1.u, ci2.u, &z1, &z2)?;
-        // use r_T=0 since we don't need hiding property for cm(T)
-        let cmT = CS::commit(cs_prover_params, &T, &C::ScalarField::zero())?;
-        Ok((T, cmT))
-    }
-
     #[allow(clippy::type_complexity)]
     pub fn prove(
         _cs_prover_params: &CS::ProverParams,
@@ -145,18 +121,18 @@ NIFS<C, CS, T, H>
         ci2: &CommittedInstance<C>,
         w1: &Witness<C>,
         w2: &Witness<C>,
-    ) -> Result<(Proof<C, T, H>, InstanceWitness<C>), Error> {
+    ) -> Result<(Proof<C>, InstanceWitness<C>), Error> {
         let start = Instant::now();
         let elapsed = start.elapsed();
         println!("Time before homogenization point-vs-line {:?}", elapsed);
         let (
             hg_proof,
-            HomogeneousEvaluationClaim {
+            PointvsLineEvaluationClaim {
                 mleE1_prime,
                 mleE2_prime,
                 rE_prime,
             },
-        ) = H::prove(transcript, ci1, ci2, w1, w2)?;
+        ) = PointVsLine::<C, T>::prove(transcript, ci1, ci2, w1, w2)?;
         let elapsed = start.elapsed();
         println!("Time after homogenization point-vs-line {:?}", elapsed);
 
@@ -199,15 +175,15 @@ NIFS<C, CS, T, H>
 
         let elapsed = start.elapsed();
         println!("Time before start folding {:?}", elapsed);
-        let temp = Ok((
-            Proof {
+        let fold = Ok((
+            Proof::<C> {
                 hg_proof,
                 mleE1_prime,
                 mleE2_prime,
                 mleT: mleT_evaluated,
             },
             InstanceWitness {
-                ci: Self::fold_homogenized_committed_instance(
+                ci: Self::fold_committed_instance(
                     rho,
                     ci1,
                     ci2,
@@ -221,7 +197,7 @@ NIFS<C, CS, T, H>
         ));
         let elapsed = start.elapsed();
         println!("Time after folding {:?}", elapsed);
-        temp
+        fold
     }
 
     /// verify implements NIFS.V logic described in [Nova](https://eprint.iacr.org/2021/370.pdf)'s
@@ -230,9 +206,9 @@ NIFS<C, CS, T, H>
         transcript: &mut impl Transcript<C::ScalarField>,
         ci1: &CommittedInstance<C>,
         ci2: &CommittedInstance<C>,
-        proof: &Proof<C, T, H>,
+        proof: &Proof<C,>
     ) -> Result<CommittedInstance<C>, Error> {
-        let rE_prime = H::verify(
+        let rE_prime = PointVsLine::<C, T>::verify(
             transcript,
             ci1,
             ci2,
@@ -249,7 +225,7 @@ NIFS<C, CS, T, H>
         transcript.absorb(&rho_scalar);
         let rho: C::ScalarField = transcript.get_challenge();
 
-        NIFS::<C, CS, T, H>::fold_homogenized_committed_instance(
+        NIFS::<C, CS, T>::fold_committed_instance(
             rho,
             ci1,
             ci2,

@@ -44,7 +44,6 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
     let poseidon_config = poseidon_canonical_config::<Fr>();
 
     let mut transcript_p: PoseidonSponge<Fr> = PoseidonSponge::<Fr>::new(&poseidon_config);
-    transcript_p.absorb(&Fr::from_le_bytes_mod_order(b"init init"));
 
     let start = Instant::now();
 
@@ -90,32 +89,29 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
 
 
 fn main() {
-    println!("starting");
-
+    // let pows: Vec<usize> = (10..24).collect();
     let pows: Vec<usize> = vec![16, 20];
-    println!("{:?}", pows);
+    let iter = 10;
+    let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len() * iter);
+    for i in 0..iter {
+        println!("starting {:}", i);
 
-    let mut prove_times: Vec<Duration> = Vec::with_capacity(pows.len());
 
-    for pow in &pows {
-        println!("{}", pow);
-        hypernova_benchmarks(*pow, &mut prove_times);
+
+        println!("{:?}", pows);
+
+
+
+        for pow in &pows {
+            println!("{}", pow);
+            hypernova_benchmarks(*pow, &mut prove_times);
+        }
+
+        println!("Powers {:?}", pows);
+        println!("Prove times {:?}", prove_times);
+
     }
-
-    println!("Powers {:?}", pows);
-
-    println!("Prove times {:?}", prove_times);
-
-    println!(
-        "| {0: <10} | {1: <10} |",
-        "2^pow", "prove time"
-    );
-    println!("| {0: <10} | {1: <10} |", "2^pow", "prove time");
-    for (pow, prove_time) in pows.iter().zip(prove_times.iter()) {
-        println!("| {0: <10} | {1:?} |", pow, prove_time);
-    }
-
-    if let Err(e) = write_to_csv(&pows, &prove_times, String::from("hypernova_prove_times.csv")) {
+    if let Err(e) = write_to_csv(&pows, &prove_times, format!("hypernova_prove_times.csv")) {
         eprintln!("Failed to write to CSV: {}", e);
     } else {
         println!("CSV file has been successfully written.");
