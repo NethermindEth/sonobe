@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::time::Instant;
 
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
