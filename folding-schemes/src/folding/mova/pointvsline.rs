@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::time::Instant;
 
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ec::{CurveGroup, Group};
@@ -56,11 +55,13 @@ where
         let elapsed = start.elapsed();
         println!("Time before computing h {:?}", elapsed);
 
-        let h1 = compute_h(&mleE1, &ci1.rE, &ci2.rE)?;
-        let h2 = compute_h(&mleE2, &ci1.rE, &ci2.rE)?;
+        let r1_sub_r0: Vec<<C>::ScalarField> =
+            ci1.rE.iter().zip(&ci2.rE).map(|(&x, y)| x - y).collect();
 
         let elapsed = start.elapsed();
         println!("Time after computing h1 h2 {:?}", elapsed);
+        let h1 = compute_h(&mleE1, &ci1.rE, &r1_sub_r0)?;
+        let h2 = compute_h(&mleE2, &ci1.rE, &r1_sub_r0)?;
 
         transcript.absorb(&h1.coeffs());
         transcript.absorb(&h2.coeffs());
@@ -76,7 +77,7 @@ where
         let elapsed = start.elapsed();
         println!("Time after evaluating h {:?}", elapsed);
 
-        let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
+        let rE_prime = compute_l(&ci1.rE, &r1_sub_r0, beta)?;
 
         Ok((
             PointVsLineProof { h1, h2 },
@@ -122,29 +123,35 @@ where
             return Err(Error::NotEqual);
         }
 
-        let rE_prime = compute_l(&ci1.rE, &ci2.rE, beta)?;
+        let r1_sub_r0: Vec<<C>::ScalarField> =
+            ci1.rE.iter().zip(&ci2.rE).map(|(&x, y)| x - y).collect();
+        let rE_prime = compute_l(&ci1.rE, &r1_sub_r0, beta)?;
 
         Ok(rE_prime)
     }
 }
 
 // TODO: Test this.
-fn compute_l<F: PrimeField>(r0: &[F], r1: &[F], x: F) -> Result<Vec<F>, Error> {
-    if r0.len() != r1.len() {
+fn compute_l<F: PrimeField>(r0: &[F], r1_sub_r0: &[F], x: F) -> Result<Vec<F>, Error> {
+    if r0.len() != r1_sub_r0.len() {
         return Err(Error::NotEqual);
     }
 
-    Ok(r0.iter().zip(r1).map(|(&r0, &r1)| r0 + x * r1).collect())
+    Ok(r0
+        .iter()
+        .zip(r1_sub_r0)
+        .map(|(&r0, &r1_sub_r0)| r0 + x * r1_sub_r0)
+        .collect())
 }
 
 // TODO: This requires thorough testing.
 fn compute_h<F: PrimeField>(
     mle: &DenseMultilinearExtension<F>,
     r0: &[F],
-    r1: &[F],
+    r1_sub_r0: &[F],
 ) -> Result<DensePolynomial<F>, Error> {
     let nv = mle.num_vars;
-    if r0.len() != r1.len() || r0.len() != nv {
+    if r0.len() != r1_sub_r0.len() || r0.len() != nv {
         return Err(Error::NotEqual);
     }
 
@@ -154,9 +161,8 @@ fn compute_h<F: PrimeField>(
         .map(|&x| DensePolynomial::from_coefficients_slice(&[x]))
         .collect();
 
-    // evaluate single variable of partial point from left to right
     for i in 1..nv + 1 {
-        let r = DensePolynomial::<F>::from_coefficients_slice(&[r0[i - 1], r1[i - 1] - r0[i - 1]]);
+        let r = DensePolynomial::<F>::from_coefficients_slice(&[r0[i - 1], r1_sub_r0[i - 1]]);
         for b in 0..1 << (nv - i) {
             let left = &poly[b << 1];
             let right = &poly[(b << 1) + 1];
@@ -164,7 +170,6 @@ fn compute_h<F: PrimeField>(
         }
     }
 
-    // Is it even fine?
     Ok(poly.swap_remove(0))
 }
 
@@ -179,7 +184,9 @@ mod tests {
         let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fq::from(1), Fq::from(2)]);
         let r0 = [Fq::from(5)];
         let r1 = [Fq::from(6)];
-        let result = compute_h(&mle, &r0, &r1).unwrap();
+        let r1_sub_r0: Vec<Fq> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+        let result = compute_h(&mle, &r0, &r1_sub_r0).unwrap();
         assert_eq!(
             result,
             DenseUVPolynomial::from_coefficients_slice(&[Fq::from(6), Fq::from(1)])
@@ -188,7 +195,9 @@ mod tests {
         let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fq::from(1), Fq::from(2)]);
         let r0 = [Fq::from(4)];
         let r1 = [Fq::from(7)];
-        let result = compute_h(&mle, &r0, &r1).unwrap();
+        let r1_sub_r0: Vec<Fq> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+        let result = compute_h(&mle, &r0, &r1_sub_r0).unwrap();
         assert_eq!(
             result,
             DenseUVPolynomial::from_coefficients_slice(&[Fq::from(5), Fq::from(3)])
@@ -200,7 +209,9 @@ mod tests {
         );
         let r0 = [Fq::from(5), Fq::from(4)];
         let r1 = [Fq::from(2), Fq::from(7)];
-        let result = compute_h(&mle, &r0, &r1).unwrap();
+        let r1_sub_r0: Vec<Fq> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+        let result = compute_h(&mle, &r0, &r1_sub_r0).unwrap();
         assert_eq!(
             result,
             DenseUVPolynomial::from_coefficients_slice(&[Fq::from(14), Fq::from(3)])
@@ -220,18 +231,21 @@ mod tests {
         );
         let r0 = [Fq::from(1), Fq::from(2), Fq::from(3)];
         let r1 = [Fq::from(5), Fq::from(6), Fq::from(7)];
-        let result = compute_h(&mle, &r0, &r1).unwrap();
+        let r1_sub_r0: Vec<Fq> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+        let result = compute_h(&mle, &r0, &r1_sub_r0).unwrap();
         assert_eq!(
             result,
             DenseUVPolynomial::from_coefficients_slice(&[Fq::from(18), Fq::from(28)])
         );
     }
+
     #[test]
     fn test_compute_h_errors() {
         let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fq::from(1), Fq::from(2)]);
         let r0 = [Fq::from(5)];
-        let r1 = [];
-        let result = compute_h(&mle, &r0, &r1);
+        let r1_sub_r0 = [];
+        let result = compute_h(&mle, &r0, &r1_sub_r0);
         assert!(result.is_err());
 
         let mle = DenseMultilinearExtension::from_evaluations_slice(
@@ -240,7 +254,9 @@ mod tests {
         );
         let r0 = [Fq::from(4)];
         let r1 = [Fq::from(7)];
-        let result = compute_h(&mle, &r0, &r1);
+        let r1_sub_r0: Vec<Fq> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+        let result = compute_h(&mle, &r0, &r1_sub_r0);
         assert!(result.is_err())
     }
 }
