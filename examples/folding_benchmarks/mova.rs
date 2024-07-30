@@ -30,7 +30,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let mut transcript_p: PoseidonSponge<Fr> = PoseidonSponge::<Fr>::new(&poseidon_config);
 
     // INSTANCE 1
-    let z_1: Vec<Fr> = get_test_z(power);
+    let z_1: Vec<Fr> = get_test_z(power, 384);
 
     let (w_1, x_1) = r1cs.split_z(&z_1);
 
@@ -44,12 +44,15 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let size_rE_1 = log2(size);
     let rE_1: Vec<_> = (0..size_rE_1).map(|_| Fr::rand(&mut rng)).collect();
 
-    let committed_instance_1 = witness_1
+    let mut committed_instance_1 = witness_1
         .commit::<Pedersen<Projective>>(&pedersen_params, x_1, rE_1)
         .unwrap();
 
+    committed_instance_1.u = Fr::rand(&mut rng);
+
+
     // INSTANCE 2
-    let z_2 = get_test_z(power);
+    let z_2 = get_test_z(power, 20);
     let (w_2, x_2) = r1cs.split_z(&z_2);
     let mut witness_2 = Witness::<Projective>::new(w_2.clone(), r1cs.A.n_rows);
 
@@ -61,9 +64,11 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let size_rE_2 = log2(size);
     let rE_2: Vec<_> = (0..size_rE_2).map(|_| Fr::rand(&mut rng)).collect();
 
-    let committed_instance_2 = witness_2
+    let mut committed_instance_2 = witness_2
         .commit::<Pedersen<Projective>>(&pedersen_params, x_2, rE_2)
         .unwrap();
+    committed_instance_2.u = Fr::rand(&mut rng);
+
 
     let start = Instant::now();
     // NIFS.P
@@ -76,7 +81,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &witness_1,
         &witness_2,
     )
-    .unwrap();
+        .unwrap();
 
     let prove_time = start.elapsed();
     prove_times.push(prove_time);
@@ -95,7 +100,7 @@ fn mova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
             &committed_instance_2,
             &proof,
         )
-        .unwrap();
+            .unwrap();
     let check =
         r1cs.check_relaxed_instance_relation(&instance_witness.w, &folded_committed_instance);
     match check {

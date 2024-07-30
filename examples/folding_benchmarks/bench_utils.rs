@@ -40,8 +40,8 @@ pub fn get_test_r1cs<F: PrimeField>(power: usize) -> R1CS<F> {
     }
 }
 
-pub fn get_test_z<F: PrimeField>(power: usize) -> Vec<F> {
-    let z_vec = create_random_biguints(1 << power, 384);
+pub fn get_test_z<F: PrimeField>(power: usize, max_bits: u32) -> Vec<F> {
+    let z_vec = create_random_biguints(1 << power, max_bits);
     to_f_vec(z_vec)
 }
 

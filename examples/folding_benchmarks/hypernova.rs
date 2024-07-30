@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
 use ark_crypto_primitives::sponge::CryptographicSponge;
+use ark_std::UniformRand;
 use folding_schemes::arith::ccs::CCS;
 use folding_schemes::arith::r1cs::R1CS;
 use folding_schemes::folding::hypernova::nimfs::NIMFS;
@@ -18,16 +19,18 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
     let mut rng = ark_std::test_rng();
     let ccs = CCS::<Fr>::from_r1cs(r1cs);
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
-    let z_1 = get_test_z(power);
-    let z_2 = get_test_z(power);
+    let z_1 = get_test_z(power, 384);
+    let z_2 = get_test_z(power, 20);
 
-    let (running_instance, w1) = ccs
+    let (mut running_instance, w1) = ccs
         .to_lcccs::<_, _, Pedersen<Projective>>(&mut rng, &pedersen_params, &z_1)
         .unwrap();
+    running_instance.u = Fr::rand(&mut rng);
 
     let (new_instance, w2) = ccs
         .to_cccs::<_, _, Pedersen<Projective>>(&mut rng, &pedersen_params, &z_2)
         .unwrap();
+
 
     let poseidon_config = poseidon_canonical_config::<Fr>();
 
@@ -43,7 +46,7 @@ fn hypernova_benchmarks(power: usize, prove_times: &mut Vec<Duration>) {
         &[w1],
         &[w2],
     )
-    .unwrap();
+        .unwrap();
 
     let prove_time = start.elapsed();
     prove_times.push(prove_time);

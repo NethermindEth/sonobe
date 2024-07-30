@@ -4,13 +4,14 @@ use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::CommitmentScheme;
 use folding_schemes::folding::nova::nifs::NIFS;
 use folding_schemes::folding::nova::traits::NovaR1CS;
-use folding_schemes::folding::nova::Witness;
+use folding_schemes::folding::nova::{Witness};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::transcript::Transcript;
 use std::time::{Duration, Instant};
 
 use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
 use ark_crypto_primitives::sponge::CryptographicSponge;
+use ark_std::UniformRand;
 
 mod bench_utils;
 
@@ -19,7 +20,8 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
 
     let r1cs = get_test_r1cs(power);
 
-    let z_1 = get_test_z(power);
+    let z_1 = get_test_z(power, 384);
+
 
     let (w, x) = r1cs.split_z(&z_1);
 
@@ -27,26 +29,33 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
     let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, r1cs.A.n_cols).unwrap();
 
     let mut witness_1 = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
-    let running_committed_instance = witness_1
-        .commit::<Pedersen<Projective>>(&pedersen_params, x)
-        .unwrap();
-
-    let z_2 = get_test_z(power);
-    let (w, x) = r1cs.split_z(&z_2);
-    let mut witness_2 = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
-    let incoming_committed_instance = witness_2
-        .commit::<Pedersen<Projective>>(&pedersen_params, x)
-        .unwrap();
-
-    let poseidon_config = poseidon_canonical_config::<Fr>();
-    let mut transcript_p: PoseidonSponge<Fr> = PoseidonSponge::<Fr>::new(&poseidon_config);
     let vector = vec![1; size];
     //
     witness_1.E = vector.into_iter().map(Fr::from).collect();
+    let mut running_committed_instance = witness_1
+        .commit::<Pedersen<Projective>>(&pedersen_params, x)
+        .unwrap();
 
+    running_committed_instance.u = Fr::rand(&mut rng);
+
+    let z_2 = get_test_z(power, 20);
+
+    let (w, x) = r1cs.split_z(&z_2);
+    let mut witness_2 = Witness::<Projective>::new(w.clone(), r1cs.A.n_rows);
     let vector = vec![2; size];
     //
     witness_2.E = vector.into_iter().map(Fr::from).collect();
+    let mut incoming_committed_instance = witness_2
+        .commit::<Pedersen<Projective>>(&pedersen_params, x)
+        .unwrap();
+
+    incoming_committed_instance.u = Fr::rand(&mut rng);
+
+    let poseidon_config = poseidon_canonical_config::<Fr>();
+    let mut transcript_p: PoseidonSponge<Fr> = PoseidonSponge::<Fr>::new(&poseidon_config);
+
+
+
     // NIFS.P
     let start = Instant::now();
 
@@ -58,7 +67,7 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &witness_2,
         &incoming_committed_instance,
     )
-    .unwrap();
+        .unwrap();
 
     let elapsed = start.elapsed();
     println!("Time before Randomness generation {:?}", elapsed);
@@ -80,7 +89,7 @@ fn nova_benchmark(power: usize, prove_times: &mut Vec<Duration>) {
         &t,
         cm_t,
     )
-    .unwrap();
+        .unwrap();
     let elapsed = start.elapsed();
 
     println!("Time after folding {:?}", elapsed);
