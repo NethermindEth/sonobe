@@ -4,7 +4,6 @@ use ark_r1cs_std::fields::fp::FpVar;
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 use ark_std::fmt::Debug;
 
-pub mod circom;
 pub mod noir;
 pub mod noname;
 pub mod utils;

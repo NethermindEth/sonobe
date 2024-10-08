@@ -23,7 +23,6 @@ use crate::Error;
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::time::Instant;
 
 /// NIMFSProof defines a multifolding proof
 #[derive(Clone, Debug, Eq, PartialEq)]
