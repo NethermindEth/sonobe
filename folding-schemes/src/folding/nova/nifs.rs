@@ -213,6 +213,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
     use ark_crypto_primitives::sponge::{
         poseidon::{PoseidonConfig, PoseidonSponge},
         CryptographicSponge,
@@ -226,8 +227,6 @@ pub mod tests {
     use crate::folding::nova::circuits::ChallengeGadget;
     use crate::folding::nova::traits::NovaR1CS;
     use crate::transcript::poseidon::poseidon_canonical_config;
-
-    use super::*;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn prepare_simple_fold_inputs<C>() -> (

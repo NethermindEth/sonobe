@@ -261,12 +261,9 @@ where
         let g = compute_g(ccs, running_instances, &z_lcccs, &z_cccs, gamma, &beta)?;
 
         // Step 3: Run the sumcheck prover
-        let start = Instant::now();
+
         let sumcheck_proof = IOPSumCheck::<C::ScalarField, T>::prove(&g, transcript)
             .map_err(|err| Error::SumCheckProveError(err.to_string()))?;
-        let prove_time = start.elapsed();
-        println!("Sumcheck time: {:?}", prove_time);
-
         // Step 2: dig into the sumcheck and extract r_x_prime
         let r_x_prime = sumcheck_proof.point.clone();
 
