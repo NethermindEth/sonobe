@@ -81,7 +81,8 @@ fn main() {
 
     let f_circuit = CubicFCircuit::<Fr>::new(()).unwrap();
 
-    pub type N = Nova<G1, GVar, G2, GVar2, CubicFCircuit<Fr>, KZG<'static, Bn254>, Pedersen<G2>>;
+    pub type N =
+        Nova<G1, GVar, G2, GVar2, CubicFCircuit<Fr>, KZG<'static, Bn254>, Pedersen<G2>, false>;
     pub type D = DeciderEth<
         G1,
         GVar,
@@ -105,7 +106,7 @@ fn main() {
     let mut nova = N::init(&nova_params, f_circuit, z_0).unwrap();
 
     // prepare the Decider prover & verifier params
-    let (decider_pp, decider_vp) = D::preprocess(&mut rng, &nova_params, nova.clone()).unwrap();
+    let (decider_pp, decider_vp) = D::preprocess(&mut rng, nova_params, nova.clone()).unwrap();
 
     // run n steps of the folding iteration
     for i in 0..n_steps {

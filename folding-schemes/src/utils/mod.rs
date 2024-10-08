@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::path::PathBuf;
+
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::PrimeField;
@@ -5,7 +8,7 @@ use ark_serialize::CanonicalSerialize;
 use ark_std::Zero;
 use sha3::{Digest, Sha3_256};
 
-use crate::arith::Arith;
+use crate::arith::ArithSerializer;
 use crate::commitment::CommitmentScheme;
 use crate::Error;
 
@@ -41,9 +44,9 @@ pub fn get_cm_coordinates<C: CurveGroup>(cm: &C) -> Vec<C::BaseField> {
 }
 
 /// returns the hash of the given public parameters of the Folding Scheme
-pub fn pp_hash<C1, C2, CS1, CS2>(
-    arith: &impl Arith<C1::ScalarField>,
-    cf_arith: &impl Arith<C2::ScalarField>,
+pub fn pp_hash<C1, C2, CS1, CS2, const H: bool>(
+    arith: &impl ArithSerializer,
+    cf_arith: &impl ArithSerializer,
     cs_vp: &CS1::VerifierParams,
     cf_cs_vp: &CS2::VerifierParams,
     poseidon_config: &PoseidonConfig<C1::ScalarField>,
@@ -51,8 +54,8 @@ pub fn pp_hash<C1, C2, CS1, CS2>(
 where
     C1: CurveGroup,
     C2: CurveGroup,
-    CS1: CommitmentScheme<C1>,
-    CS2: CommitmentScheme<C2>,
+    CS1: CommitmentScheme<C1, H>,
+    CS2: CommitmentScheme<C2, H>,
 {
     let mut hasher = Sha3_256::new();
 
@@ -99,4 +102,32 @@ where
     Ok(C1::ScalarField::from_le_bytes_mod_order(
         &public_params_hash,
     ))
+}
+
+/// Tiny utility enum that allows to import circuits and wasm modules from files by passing their path
+/// or passing their content already read.
+///
+/// This enum implements the [`From`] trait for both [`Path`], [`PathBuf`] and [`Vec<u8>`].
+#[derive(Debug, Clone)]
+pub enum PathOrBin {
+    Path(PathBuf),
+    Bin(Vec<u8>),
+}
+
+impl From<&Path> for PathOrBin {
+    fn from(value: &Path) -> Self {
+        PathOrBin::Path(value.into())
+    }
+}
+
+impl From<PathBuf> for PathOrBin {
+    fn from(value: PathBuf) -> Self {
+        PathOrBin::Path(value)
+    }
+}
+
+impl From<Vec<u8>> for PathOrBin {
+    fn from(value: Vec<u8>) -> Self {
+        PathOrBin::Bin(value)
+    }
 }

@@ -230,8 +230,10 @@ pub mod tests {
         let ccs = get_test_ccs();
         let z1 = get_test_z(3);
         let z2 = get_test_z(4);
-        ccs.check_relation(&z1).unwrap();
-        ccs.check_relation(&z2).unwrap();
+        let (w1, x1) = ccs.split_z(&z1);
+        let (w2, x2) = ccs.split_z(&z2);
+        ccs.check_relation(&w1, &x1).unwrap();
+        ccs.check_relation(&w2, &x2).unwrap();
 
         let mut rng = test_rng();
         let gamma: Fr = Fr::rand(&mut rng);
@@ -242,7 +244,7 @@ pub mod tests {
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
         let (lcccs_instance, _) = ccs
-            .to_lcccs::<_, _, Pedersen<Projective>>(&mut rng, &pedersen_params, &z1)
+            .to_lcccs::<_, _, Pedersen<Projective>, false>(&mut rng, &pedersen_params, &z1)
             .unwrap();
 
         let sigmas_thetas =
@@ -282,8 +284,10 @@ pub mod tests {
         let ccs: CCS<Fr> = get_test_ccs();
         let z1 = get_test_z(3);
         let z2 = get_test_z(4);
-        ccs.check_relation(&z1).unwrap();
-        ccs.check_relation(&z2).unwrap();
+        let (w1, x1) = ccs.split_z(&z1);
+        let (w2, x2) = ccs.split_z(&z2);
+        ccs.check_relation(&w1, &x1).unwrap();
+        ccs.check_relation(&w2, &x2).unwrap();
 
         let gamma: Fr = Fr::rand(&mut rng);
         let beta: Vec<Fr> = (0..ccs.s).map(|_| Fr::rand(&mut rng)).collect();
@@ -292,7 +296,7 @@ pub mod tests {
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, ccs.n - ccs.l - 1).unwrap();
         let (lcccs_instance, _) = ccs
-            .to_lcccs::<_, _, Pedersen<Projective>>(&mut rng, &pedersen_params, &z1)
+            .to_lcccs::<_, _, Pedersen<Projective>, false>(&mut rng, &pedersen_params, &z1)
             .unwrap();
 
         // Compute g(x) with that r_x

@@ -41,6 +41,10 @@ pub enum Error {
     SNARKVerificationFail,
     #[error("IVC verification failed")]
     IVCVerificationFail,
+    #[error("zkIVC verification failed")]
+    zkIVCVerificationFail,
+    #[error("Committed instance is expected to be an incoming (fresh) instance")]
+    NotIncomingCommittedInstance,
     #[error("R1CS instance is expected to not be relaxed")]
     R1CSUnrelaxedFail,
     #[error("Could not find the inner ConstraintSystem")]
@@ -77,6 +81,8 @@ pub enum Error {
     PedersenParamsLen(usize, usize),
     #[error("Blinding factor not 0 for Commitment without hiding")]
     BlindingNotZero,
+    #[error("Blinding factors incorrect, blinding is set to {0} but blinding values are {1}")]
+    IncorrectBlinding(bool, String),
     #[error("Commitment verification failed")]
     CommitmentVerificationFail,
 
@@ -215,7 +221,7 @@ pub trait Decider<
 
     fn preprocess(
         rng: impl RngCore + CryptoRng,
-        prep_param: &Self::PreprocessorParam,
+        prep_param: Self::PreprocessorParam,
         fs: FS,
     ) -> Result<(Self::ProverParam, Self::VerifierParam), Error>;
 
