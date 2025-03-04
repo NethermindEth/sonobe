@@ -58,6 +58,7 @@ jobs:
          SSH_PASSPHRASE: ${{ secrets.CI_SSH_PASSPHRASE }}
          SSH_PRIVATE_KEY: ${{ secrets.CI_KEY }}
         run: |
+          mkdir -p ~/.ssh
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
           echo "$SSH_PRIVATE_KEY" | base64 --decode | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -139,6 +140,7 @@ jobs:
           SSH_PASSPHRASE: ${{ secrets.CI_SSH_PASSPHRASE }}
           SSH_PRIVATE_KEY: ${{ secrets.CI_KEY }}
         run: |
+          mkdir -p ~/.ssh
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
           echo "$SSH_PRIVATE_KEY" | base64 --decode | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -225,6 +227,7 @@ jobs:
           SSH_PASSPHRASE: ${{ secrets.CI_SSH_PASSPHRASE }}
           SSH_PRIVATE_KEY: ${{ secrets.CI_KEY }}
         run: |
+          mkdir -p ~/.ssh
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
           echo "$SSH_PRIVATE_KEY" | base64 --decode | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
