@@ -1,9 +1,10 @@
+use ark_ec::CurveGroup;
 use ark_r1cs_std::{boolean::Boolean, convert::ToBitsGadget, prelude::CurveVar};
 use ark_relations::r1cs::SynthesisError;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{marker::PhantomData, rand::RngCore, UniformRand, Zero};
 
-use super::CommitmentScheme;
+use super::{CommitmentScheme, SparseCommitmentScheme};
 use crate::folding::circuits::CF2;
 use crate::transcript::Transcript;
 use crate::utils::vec::{vec_add, vec_scalar_mul};
@@ -41,7 +42,11 @@ impl<C: Curve, const H: bool> CommitmentScheme<C, H> for Pedersen<C, H> {
         }
         false
     }
-
+    //10elems 7zeros 3rand 0, r1, 0,0
+    //4 generatos to commit to witness
+    // gens  = g1, g2,g3,g4, ..., g10
+    // matrice = 0,r1,0,0,r2,0,r3,...
+    // r1 * g2, r2 * g5
     fn setup(
         mut rng: impl RngCore,
         len: usize,
@@ -171,6 +176,31 @@ impl<C: Curve, const H: bool> CommitmentScheme<C, H> for Pedersen<C, H> {
             return Err(Error::CommitmentVerificationFail);
         }
         Ok(())
+    }
+}
+
+impl<C: Curve, const H: bool> SparseCommitmentScheme<C, H> for Pedersen<C, H> {
+    fn commit_sparse(
+        params: &Self::ProverParams,
+        v: &[(usize, C::ScalarField)],
+        r: &C::ScalarField,
+    ) -> Result<C, Error> {
+        // if !H && (!r.is_zero()) {
+        //     return Err(Error::BlindingNotZero);
+        // }
+        // let selected_generators: Vec<<C as CurveGroup>::Affine> = v
+        //     .iter()
+        //     .map(|(i, _)| params.generators[*i])
+        //     .collect();
+        // let values: Vec<C::ScalarField> = v.iter().map(|(_, val)| *val).collect();
+        //
+        //
+        // if !H {
+        //     return Ok(C::msm_unchecked(&selected_generators, &values));
+        // }
+        // Ok(params.h.mul(r) + C::msm_unchecked(&selected_generators, &values))
+        Ok(v.iter()
+            .fold(C::zero(), |acc, &(index, value)| acc + params.generators[index] * value))
     }
 }
 

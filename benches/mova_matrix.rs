@@ -4,7 +4,7 @@ use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
 use criterion::{criterion_group, criterion_main, Criterion};
 use folding_schemes::commitment::pedersen::Pedersen;
-use folding_schemes::commitment::CommitmentScheme;
+use folding_schemes::commitment::{CommitmentScheme, SparseCommitmentScheme};
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::Curve;
@@ -27,7 +27,7 @@ fn random_sparse_matrix<C: Curve>(n: usize, rng: &mut impl RngCore) -> Matrix<C:
 }
 
 // Helper functions
-fn get_instances<C: Curve, CS: CommitmentScheme<C>>(
+fn get_instances<C: Curve, CS: CommitmentScheme<C> + SparseCommitmentScheme<C>>(
     num: usize,
     n: usize,
     rng: &mut impl RngCore,

@@ -67,6 +67,14 @@ pub trait CommitmentScheme<C: Curve, const H: bool = false>: Clone + Debug {
     ) -> Result<(), Error>;
 }
 
+pub trait SparseCommitmentScheme<C: Curve, const H: bool = false>: CommitmentScheme<C, H> {
+    fn commit_sparse(
+        params: &Self::ProverParams,
+        v: &[(usize, C::ScalarField)],
+        r: &C::ScalarField,
+    ) -> Result<C, Error>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
