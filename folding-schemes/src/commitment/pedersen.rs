@@ -199,9 +199,25 @@ impl<C: Curve, const H: bool> SparseCommitmentScheme<C, H> for Pedersen<C, H> {
         //     return Ok(C::msm_unchecked(&selected_generators, &values));
         // }
         // Ok(params.h.mul(r) + C::msm_unchecked(&selected_generators, &values))
-        Ok(v.iter()
-            .fold(C::zero(), |acc, &(index, value)| acc + params.generators[index] * value))
+        Ok(v.iter().fold(C::zero(), |acc, &(index, value)| {
+            acc + params.generators[index] * value
+        }))
     }
+
+    fn setup2(
+        mut rng: impl RngCore,
+        len: usize,
+    ) -> Result<(Self::ProverParams), Error> {
+        let generators: Vec<C::Affine> = std::iter::repeat_with(|| C::Affine::rand(&mut rng))
+            .take(len.next_power_of_two())
+            .collect();
+        let p = Params::<C> {
+            h: C::rand(&mut rng),
+            generators,
+        };
+        Ok(p)
+    }
+
 }
 
 pub struct PedersenGadget<C: Curve, const H: bool = false> {

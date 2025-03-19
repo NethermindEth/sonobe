@@ -98,8 +98,11 @@ impl<C: Curve> Witness<C> {
             mleE = mle.evaluate(&rE);
         }
 
-
         // Right now we are ignoring the hiding property and directly commit to the matrices
+        // println!("A len {:?}", self.A.len());
+        let mut dense =self.A.clone();
+        dense.to_dense();
+        // println!("A len {:?}", dense.len());
         let com_a = CS::commit_sparse(
             params,
             self.A.as_sparse_slice().unwrap(),
@@ -154,8 +157,12 @@ pub struct NIFS<
     _ct: PhantomData<T>,
 }
 
-impl<C: Curve, CS: CommitmentScheme<C, H> + SparseCommitmentScheme<C>, T: Transcript<C::ScalarField>, const H: bool>
-    NIFS<C, CS, T, H>
+impl<
+        C: Curve,
+        CS: CommitmentScheme<C, H> + SparseCommitmentScheme<C>,
+        T: Transcript<C::ScalarField>,
+        const H: bool,
+    > NIFS<C, CS, T, H>
 {
     fn new_witness(
         a: Matrix<C::ScalarField>,
@@ -216,6 +223,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H> + SparseCommitmentScheme<C>, T: Transc
     ) -> Result<(Witness<C>, RelaxedCommittedRelation<C>, Proof<C>), Error> {
         // Verify instances have the correct form.
         // 2 simple instances can be folded, a simple and an accumulated instance can also be folded. 2 accumulated instances cannot be folded
+        println!("Starting line vs point");
         if simple_instance.is_accumulated() {
             return if acc_instance.is_simple() {
                 Err(Error::Other(String::from(
@@ -248,14 +256,18 @@ impl<C: Curve, CS: CommitmentScheme<C, H> + SparseCommitmentScheme<C>, T: Transc
         )?;
 
         transcript.absorb(&mleE2_prime);
+        println!("Calculating T");
+
 
         // Compute cross term T
-        let A1B2 = (simple_witness.A.clone() * &acc_witness.B).unwrap();// Sparse * Dense = Sparse
+        let A1B2 = (simple_witness.A.clone() * &acc_witness.B).unwrap(); // Sparse * Dense = Sparse
+        // println!("{:?}", acc_witness.A);
 
-        let B1A2 = (&acc_witness.A * &simple_witness.B).unwrap();// Dense * Sparse = Sparse
-        let A1B2B1A2 = (A1B2 + B1A2).unwrap();// Sparse (but less sparse)
+        let B1A2 = (&acc_witness.A * &simple_witness.B).unwrap(); // Dense * Sparse = Sparse
+        println!("{:?}", acc_witness.A);
+        let A1B2B1A2 = (A1B2 + B1A2).unwrap(); // Sparse (but less sparse)
         let u2c1 = simple_witness.C.clone() * acc_instance.u; // Sparse  * field
-        let T: Matrix<C::ScalarField> = ((A1B2B1A2 - &acc_witness.C).unwrap() - u2c1).unwrap();// Sparse ( BUt less sparse) - Dense = Dense (but with some sparsity)
+        let T: Matrix<C::ScalarField> = ((A1B2B1A2 - &acc_witness.C).unwrap() - u2c1).unwrap(); // Sparse ( BUt less sparse) - Dense = Dense (but with some sparsity)
 
         // Compute MLE_T
         let n_vars: usize = log2(simple_witness.E.len()) as usize;
@@ -263,12 +275,20 @@ impl<C: Curve, CS: CommitmentScheme<C, H> + SparseCommitmentScheme<C>, T: Transc
             return Err(Error::NotExpectedLength(T.len(), n_vars));
         }
 
+        println!("Calculating MLE");
+        println!("{:?}", T.len());
+        println!("{:?}", n_vars);
+
+
+
         let mle = MultilinearExtension::from_evaluations(&T, n_vars);
         let mleT_evaluated = mle.evaluate(&rE_prime);
 
         // Derive alpha
         transcript.absorb(&mleT_evaluated);
         let alpha: C::ScalarField = transcript.get_challenge();
+        println!("Fold Committed");
+
 
         let ci = Self::fold_committed_instance(
             alpha,
@@ -278,6 +298,8 @@ impl<C: Curve, CS: CommitmentScheme<C, H> + SparseCommitmentScheme<C>, T: Transc
             &mleE2_prime,
             &mleT_evaluated,
         )?;
+        println!("Fold witness");
+
         let w = Self::fold_witness(alpha, simple_witness, acc_witness, T)?;
 
         let proof = Proof::<C> {
@@ -485,9 +507,11 @@ pub mod tests {
         // Set up test instances
         let mut rng = ark_std::test_rng();
         let n_instances = 2;
-        let mat_dim = 4; // 4x4 matrices
+        let mat_dim = 8; // 4x4 matrices
 
         // Set up transcript and commitment scheme
+        let temp = mat_dim * mat_dim;
+        println!("temp {}", temp);
         let (pedersen_params, _) =
             Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
         let poseidon_config = poseidon_canonical_config::<Fr>();

@@ -4,6 +4,7 @@ use ark_std::rand::RngCore;
 
 use crate::transcript::Transcript;
 use crate::{Curve, Error};
+use crate::commitment::pedersen::Params;
 
 pub mod ipa;
 pub mod kzg;
@@ -73,6 +74,10 @@ pub trait SparseCommitmentScheme<C: Curve, const H: bool = false>: CommitmentSch
         v: &[(usize, C::ScalarField)],
         r: &C::ScalarField,
     ) -> Result<C, Error>;
+    fn setup2(
+        rng: impl RngCore,
+        len: usize,
+    ) -> Result<Self::ProverParams, Error>;
 }
 
 #[cfg(test)]
