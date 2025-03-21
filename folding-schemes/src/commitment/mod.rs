@@ -67,6 +67,16 @@ pub trait CommitmentScheme<C: Curve, const H: bool = false>: Clone + Debug {
     ) -> Result<(), Error>;
 }
 
+pub trait NethermindCommitmentScheme<C: Curve, const H: bool = false>:
+    CommitmentScheme<C, H>
+{
+    fn commit_sparse(
+        params: &Self::ProverParams,
+        v: &[(usize, C::ScalarField)],
+        r: &C::ScalarField,
+    ) -> Result<C, Error>;
+    fn setup2(rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error>;
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,7 +2,7 @@
 /// Mova-like folding for matrix multiplications as described in "Folding and Lookup Arguments for Proving Inference of Deep Learning Models" by Nethermind Research
 /// Currently, we are not interested in the hiding properties, so we ignore the hiding factors and focus on the succinctness property.
 /// Please note the code could be easily extended so support hiding.
-use crate::commitment::CommitmentScheme;
+use crate::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use crate::folding::nova::nifs::pointvsline::{
     PointVsLine, PointVsLineEvaluationClaimMatrix, PointVsLineMatrix, PointVsLineProofMatrix,
 };
@@ -87,9 +87,9 @@ impl<C: Curve> Witness<C> {
     /// * `self` - Witness instance to be committed.
     /// * `params` - Commitment scheme parameters.
     /// * `rE` - Random evaluation point for the committed instance.
-    pub fn commit<CS: CommitmentScheme<C, H>, const H: bool>(
+    pub fn commit<CS: CommitmentScheme<C, H> + NethermindCommitmentScheme<C>, const H: bool>(
         &self,
-        params: &CS::ProverParams,
+        params: &<CS as CommitmentScheme<C>>::ProverParams,
         rE: Vec<C::ScalarField>,
     ) -> Result<RelaxedCommittedRelation<C>, Error> {
         let mut mleE = C::ScalarField::zero();
@@ -97,29 +97,31 @@ impl<C: Curve> Witness<C> {
             let mle = MultilinearExtension::from_evaluations(&self.E, log2(self.E.len()) as usize);
             mleE = mle.evaluate(&rE);
         }
-
-        let mut dense_a = self.A.clone();
-        let mut dense_b = self.B.clone();
-        let mut dense_c = self.C.clone();
-        dense_a.to_dense();
-        dense_b.to_dense();
-        dense_c.to_dense();
         // Right now we are ignoring the hiding property and directly commit to the matrices
-        let com_a = CS::commit(
+        let com_a = CS::commit_sparse(
             params,
-            dense_a.as_dense_slice().unwrap(),
+            self.A.as_sparse_slice().unwrap(),
             &C::ScalarField::zero(),
         )?;
-        let com_b = CS::commit(
+        let com_b = CS::commit_sparse(
             params,
-            dense_b.as_dense_slice().unwrap(),
+            self.B.as_sparse_slice().unwrap(),
             &C::ScalarField::zero(),
         )?;
-        let com_c = CS::commit(
-            params,
-            dense_c.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
+        let com_c;
+        if self.C.is_dense() {
+            com_c = <CS as CommitmentScheme<C, false>>::commit(
+                params,
+                self.C.as_dense_slice().unwrap(),
+                &C::ScalarField::zero(),
+            )?;
+        } else {
+            com_c = CS::commit_sparse(
+                params,
+                self.C.as_sparse_slice().unwrap(),
+                &C::ScalarField::zero(),
+            )?;
+        }
 
         Ok(RelaxedCommittedRelation {
             cmA: com_a,
@@ -159,8 +161,12 @@ pub struct NIFS<
     _ct: PhantomData<T>,
 }
 
-impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const H: bool>
-    NIFS<C, CS, T, H>
+impl<
+        C: Curve,
+        CS: CommitmentScheme<C, H> + NethermindCommitmentScheme<C>,
+        T: Transcript<C::ScalarField>,
+        const H: bool,
+    > NIFS<C, CS, T, H>
 {
     fn new_witness(
         a: Matrix<C::ScalarField>,
@@ -173,7 +179,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
 
     fn new_instance(
         mut rng: impl RngCore,
-        params: &CS::ProverParams,
+        params: &<CS as CommitmentScheme<C>>::ProverParams,
         witness: Witness<C>,
         aux: Vec<C::ScalarField>, // rE in MOVA notation.
     ) -> Result<RelaxedCommittedRelation<C>, Error> {
@@ -189,15 +195,25 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
 
     // Protocol 5 - point 8 (Page 25)
     fn fold_witness(
-        alpha: C::ScalarField,       // Random challenge
-        simple_wit: &Witness<C>,     // Simple witness
-        acc_wit: &Witness<C>,        // Accumulated witness
-        aux: Matrix<C::ScalarField>, // T in Mova's notation
+        alpha: C::ScalarField,           // Random challenge
+        simple_wit: &mut Witness<C>,     // Simple witness
+        acc_wit: &Witness<C>,            // Accumulated witness
+        mut aux: Matrix<C::ScalarField>, // T in Mova's notation
     ) -> Result<Witness<C>, Error> {
-        let a_acc = ((simple_wit.A.clone() * alpha) + &acc_wit.A).unwrap();
-        let b_acc = ((simple_wit.B.clone() * alpha) + &acc_wit.B).unwrap();
-        let c_acc = ((simple_wit.C.clone() * alpha) + &acc_wit.C).unwrap();
-        let e_acc = ((aux * alpha) + acc_wit.E.clone()).unwrap();
+        // println!("1 {:?}", simple_wit.A);
+        simple_wit.A *= alpha;
+        simple_wit.B *= alpha;
+        simple_wit.C *= alpha;
+        aux *= alpha;
+        // println!("2 {:?}", simple_wit.A);
+
+        let a_acc = (&simple_wit.A + &acc_wit.A).unwrap();
+        // println!("3 {:?}", simple_wit.A);
+        // println!("4 {:?}", a_acc);
+
+        let b_acc = (&simple_wit.B + &acc_wit.B).unwrap();
+        let c_acc = (&simple_wit.C + &acc_wit.C).unwrap();
+        let e_acc = (aux + &acc_wit.E).unwrap();
 
         Ok(Witness::<C> {
             A: a_acc,
@@ -214,7 +230,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
     pub fn prove(
         transcript: &mut T,
         pp_hash: C::ScalarField,
-        simple_witness: &Witness<C>,
+        simple_witness: &mut Witness<C>,
         simple_instance: &RelaxedCommittedRelation<C>,
         acc_witness: &Witness<C>,
         acc_instance: &RelaxedCommittedRelation<C>,
@@ -255,7 +271,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
         transcript.absorb(&mleE2_prime);
 
         // Compute cross term T
-        let A1B2 = (simple_witness.A.clone() * &acc_witness.B).unwrap();
+        let A1B2 = (&simple_witness.A * &acc_witness.B).unwrap();
 
         let B1A2 = (&acc_witness.A * &simple_witness.B).unwrap();
         let A1B2B1A2 = (A1B2 + B1A2).unwrap();
@@ -462,7 +478,7 @@ pub mod tests {
     }
 
     // Helper functions
-    fn get_instances<C: Curve, CS: CommitmentScheme<C>>(
+    fn get_instances<C: Curve, CS: CommitmentScheme<C> + NethermindCommitmentScheme<C>>(
         num: usize,
         n: usize,
         rng: &mut impl RngCore,
@@ -475,7 +491,8 @@ pub mod tests {
                 // B matrix
                 let b = random_sparse_matrix::<C>(n, rng);
                 // C = A * B matrix
-                let c = (&a * &b).unwrap();
+                let mut c = (&a * &b).unwrap();
+                c.to_dense();
                 // Error matrix initialized to 0s
                 let e = Matrix::zero(n, n);
 
@@ -498,14 +515,13 @@ pub mod tests {
         let mat_dim = 4; // 4x4 matrices
 
         // Set up transcript and commitment scheme
-        let (pedersen_params, _) =
-            Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
+        let pedersen_params = Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
         let pp_hash = Fr::rand(&mut rng);
 
-        let instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
+        let mut instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
             get_instances::<Projective, Pedersen<Projective>>(
                 n_instances,
                 mat_dim,
@@ -513,39 +529,41 @@ pub mod tests {
                 &pedersen_params,
             );
 
-        for i in 0..instances.len() - 1 {
-            // Fold
-            let (wit_acc, instance_acc, proof) =
-                NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
-                    &mut transcript_p,
-                    pp_hash,
-                    &instances[i].0,
-                    &instances[i].1,
-                    &instances[i + 1].0,
-                    &instances[i + 1].1,
-                )
-                .unwrap();
+        let (left, right) = instances.split_at_mut(1);
+        let (ref mut simple_w, ref simple_i) = &mut left[0];
+        let (ref acc_w, ref acc_i) = &mut right[0];
 
-            // Verify
-            let (ci_verify, _) =
-                NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::verify(
-                    &mut transcript_v,
-                    pp_hash,
-                    &instances[i].1,
-                    &instances[i + 1].1,
-                    &proof,
-                )
-                .unwrap();
-
-            // Ensure they match
-            assert_eq!(instance_acc, ci_verify);
-            NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::check_relation(
-                &wit_acc,
-                &instance_acc,
-                &pedersen_params,
+        let (wit_acc, inst_acc, proof) =
+            NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
+                &mut transcript_p,
+                pp_hash,
+                simple_w,
+                &simple_i,
+                &acc_w,
+                &acc_i,
             )
-            .expect("Relationship check failed");
-        }
+            .unwrap();
+
+        // Verify
+        let (ci_verify, _) = NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::verify(
+            &mut transcript_v,
+            pp_hash,
+            &simple_i,
+            &acc_i,
+            &proof,
+        )
+        .unwrap();
+
+        // Ensure they match
+        assert_eq!(inst_acc, ci_verify);
+
+        // Update state for next iteration
+        NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::check_relation(
+            &wit_acc,
+            &inst_acc,
+            &pedersen_params,
+        )
+        .expect("Relationship check failed");
     }
 
     #[test]
@@ -557,8 +575,7 @@ pub mod tests {
         let mat_dim = 16; // 16x16 matrices
 
         // Set up transcript and commitment scheme
-        let (pedersen_params, _) =
-            Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
+        let pedersen_params = Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
@@ -578,13 +595,13 @@ pub mod tests {
         let mut current_acc_inst = first_instance.1;
 
         // Fold through all remaining instances
-        for (next_w, next_i) in instances {
+        for (mut next_w, next_i) in instances {
             // Fold
             let (wit_acc, inst_acc, proof) =
                 NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
                     &mut transcript_p,
                     pp_hash,
-                    &next_w,
+                    &mut next_w,
                     &next_i,
                     &current_acc_wit,
                     &current_acc_inst,

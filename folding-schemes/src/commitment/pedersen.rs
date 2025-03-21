@@ -3,7 +3,7 @@ use ark_relations::r1cs::SynthesisError;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{marker::PhantomData, rand::RngCore, UniformRand, Zero};
 
-use super::CommitmentScheme;
+use super::{CommitmentScheme, NethermindCommitmentScheme};
 use crate::folding::circuits::CF2;
 use crate::transcript::Transcript;
 use crate::utils::vec::{vec_add, vec_scalar_mul};
@@ -178,6 +178,40 @@ pub struct PedersenGadget<C: Curve, const H: bool = false> {
     _c: PhantomData<C>,
 }
 
+impl<C: Curve, const H: bool> NethermindCommitmentScheme<C, H> for Pedersen<C, H> {
+    fn commit_sparse(
+        params: &Self::ProverParams,
+        v: &[(usize, C::ScalarField)],
+        r: &C::ScalarField,
+    ) -> Result<C, Error> {
+        let (selected_generators, values): (Vec<_>, Vec<_>) = v
+            .iter()
+            .map(|(i, val)| (params.generators[*i], *val))
+            .unzip();
+
+        let msm_result = C::msm_unchecked(&selected_generators, &values);
+
+        if !H {
+            if !r.is_zero() {
+                return Err(Error::BlindingNotZero);
+            }
+            Ok(msm_result)
+        } else {
+            Ok(params.h.mul(r) + msm_result)
+        }
+    }
+
+    fn setup2(mut rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error> {
+        let generators: Vec<C::Affine> = std::iter::repeat_with(|| C::Affine::rand(&mut rng))
+            .take(len.next_power_of_two())
+            .collect();
+        let p = Params::<C> {
+            h: C::rand(&mut rng),
+            generators,
+        };
+        Ok(p)
+    }
+}
 impl<C: Curve, const H: bool> PedersenGadget<C, H> {
     pub fn commit(
         h: &C::Var,
