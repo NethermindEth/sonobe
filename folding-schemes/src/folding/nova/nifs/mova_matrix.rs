@@ -108,20 +108,19 @@ impl<C: Curve> Witness<C> {
             self.B.as_sparse_slice().unwrap(),
             &C::ScalarField::zero(),
         )?;
-        let com_c;
-        if self.C.is_dense() {
-            com_c = <CS as CommitmentScheme<C, false>>::commit(
+        let com_c = if self.C.is_dense() {
+            <CS as CommitmentScheme<C, false>>::commit(
                 params,
                 self.C.as_dense_slice().unwrap(),
                 &C::ScalarField::zero(),
-            )?;
+            )?
         } else {
-            com_c = CS::commit_sparse(
+            CS::commit_sparse(
                 params,
                 self.C.as_sparse_slice().unwrap(),
                 &C::ScalarField::zero(),
-            )?;
-        }
+            )?
+        };
 
         Ok(RelaxedCommittedRelation {
             cmA: com_a,
@@ -271,12 +270,12 @@ impl<
         transcript.absorb(&mleE2_prime);
 
         // Compute cross term T
-        let A1B2 = (&simple_witness.A * &acc_witness.B).unwrap();
+        let mut A1B2 = (&simple_witness.A * &acc_witness.B).unwrap(); // Representing A1B2A2B1 later
 
         let B1A2 = (&acc_witness.A * &simple_witness.B).unwrap();
-        let A1B2B1A2 = (A1B2 + B1A2).unwrap();
+        A1B2 += B1A2;
         let u2c1 = simple_witness.C.clone() * acc_instance.u;
-        let T: Matrix<C::ScalarField> = ((A1B2B1A2 - &acc_witness.C).unwrap() - u2c1).unwrap();
+        let T: Matrix<C::ScalarField> = ((A1B2 - &acc_witness.C).unwrap() - u2c1).unwrap();
 
         // Compute MLE_T
         let n_vars: usize = log2(simple_witness.E.len()) as usize;
@@ -491,8 +490,7 @@ pub mod tests {
                 // B matrix
                 let b = random_sparse_matrix::<C>(n, rng);
                 // C = A * B matrix
-                let mut c = (&a * &b).unwrap();
-                c.to_dense();
+                let c = (&a * &b).unwrap();
                 // Error matrix initialized to 0s
                 let e = Matrix::zero(n, n);
 

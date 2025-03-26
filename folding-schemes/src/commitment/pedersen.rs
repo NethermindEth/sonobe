@@ -202,13 +202,20 @@ impl<C: Curve, const H: bool> NethermindCommitmentScheme<C, H> for Pedersen<C, H
     }
 
     fn setup2(mut rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error> {
-        let generators: Vec<C::Affine> = std::iter::repeat_with(|| C::Affine::rand(&mut rng))
-            .take(len.next_power_of_two())
-            .collect();
+        // Pre-calculate the size and pre-allocate the vector capacity
+        let size = len.next_power_of_two();
+
+        let mut generators = Vec::with_capacity(size);
+
+        for _ in 0..size {
+            generators.push(C::Affine::rand(&mut rng));
+        }
+
         let p = Params::<C> {
             h: C::rand(&mut rng),
             generators,
         };
+
         Ok(p)
     }
 }
