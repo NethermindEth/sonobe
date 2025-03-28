@@ -95,16 +95,19 @@ fn bench_mova_matrix(c: &mut Criterion) {
                             total_duration += {
                                 let timer = Instant::now();
 
-                                let (wit_acc, inst_acc, _) =
-                                    NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
-                                        &mut transcript_p,
-                                        pp_hash,
-                                        &mut next.0,
-                                        &next.1,
-                                        &acc.0,
-                                        &acc.1,
-                                    )
-                                        .unwrap();
+                                let (wit_acc, inst_acc, _) = NIFS::<
+                                    Projective,
+                                    Pedersen<Projective>,
+                                    PoseidonSponge<Fr>,
+                                >::prove(
+                                    &mut transcript_p,
+                                    pp_hash,
+                                    &mut next.0,
+                                    &next.1,
+                                    &acc.0,
+                                    &acc.1,
+                                )
+                                .unwrap();
                                 let time = timer.elapsed();
                                 acc = (wit_acc, inst_acc);
                                 time
