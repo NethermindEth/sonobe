@@ -416,7 +416,9 @@ mod tests {
     use ark_std::{log2, UniformRand};
 
     use crate::folding::nova::nifs::mova::Witness;
-    use crate::folding::nova::nifs::mova_matrix::Witness as MatrixWitness;
+    use crate::folding::nova::nifs::mova_matrix::{
+        RelaxedCommittedRelation, Witness as MatrixWitness,
+    };
 
     use crate::utils::mle::MultilinearExtension;
     use ark_crypto_primitives::sponge::CryptographicSponge;
@@ -621,8 +623,37 @@ mod tests {
             C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
             E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
         };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let U_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, rE)?;
+        let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+        // below is the commit code modified to work with dense matrices.
+        let U_i = {
+            let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
+            let mleE = mle.evaluate(&rE);
+            // Right now we are ignoring the hiding property and directly commit to the matrices
+            let com_a = Pedersen::<Projective, false>::commit(
+                &pedersen_params,
+                W_i.A.as_dense_slice().unwrap(),
+                &Fr::zero(),
+            )?;
+            let com_b = Pedersen::<Projective, false>::commit(
+                &pedersen_params,
+                W_i.B.as_dense_slice().unwrap(),
+                &Fr::zero(),
+            )?;
+            let com_c = Pedersen::<Projective, false>::commit(
+                &pedersen_params,
+                W_i.C.as_dense_slice().unwrap(),
+                &Fr::zero(),
+            )?;
+
+            RelaxedCommittedRelation {
+                cmA: com_a,
+                cmB: com_b,
+                cmC: com_c,
+                u: Fr::one(),
+                mleE,
+                rE,
+            }
+        };
 
         let w_i = MatrixWitness {
             A: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
@@ -630,8 +661,37 @@ mod tests {
             C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
             E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
         };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let u_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, rE)?;
+        let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+        // below is the commit code modified to work with dense matrices.
+        let u_i = {
+            let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
+            let mleE = mle.evaluate(&rE);
+            // Right now we are ignoring the hiding property and directly commit to the matrices
+            let com_a = Pedersen::<Projective, false>::commit(
+                &pedersen_params,
+                w_i.A.as_dense_slice().unwrap(),
+                &Fr::zero(),
+            )?;
+            let com_b = Pedersen::<Projective, false>::commit(
+                &pedersen_params,
+                w_i.B.as_dense_slice().unwrap(),
+                &Fr::zero(),
+            )?;
+            let com_c = Pedersen::<Projective, false>::commit(
+                &pedersen_params,
+                w_i.C.as_dense_slice().unwrap(),
+                &Fr::zero(),
+            )?;
+
+            RelaxedCommittedRelation {
+                cmA: com_a,
+                cmB: com_b,
+                cmC: com_c,
+                u: Fr::one(),
+                mleE,
+                rE,
+            }
+        };
 
         let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
 
