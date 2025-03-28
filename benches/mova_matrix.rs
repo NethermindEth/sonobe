@@ -4,7 +4,7 @@ use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
 use criterion::{criterion_group, criterion_main, Criterion};
 use folding_schemes::commitment::pedersen::Pedersen;
-use folding_schemes::commitment::CommitmentScheme;
+use folding_schemes::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::Curve;
@@ -27,7 +27,7 @@ fn random_sparse_matrix<C: Curve>(n: usize, rng: &mut impl RngCore) -> Matrix<C:
 }
 
 // Helper functions
-fn get_instances<C: Curve, CS: CommitmentScheme<C>>(
+fn get_instances<C: Curve, CS: CommitmentScheme<C> + NethermindCommitmentScheme<C>>(
     num: usize,
     n: usize,
     rng: &mut impl RngCore,
@@ -37,12 +37,17 @@ fn get_instances<C: Curve, CS: CommitmentScheme<C>>(
         .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
             // A matrix
             let a = random_sparse_matrix::<C>(n, rng);
+            // println!("Size of `a` by value: {} bytes", size_of_val(&a));
+            // println!("Size of `scalar` by value: {} bytes",size_of::<C::ScalarField>());
+
             // B matrix
             let b = random_sparse_matrix::<C>(n, rng);
             // C = A * B matrix
-            let c = (a.clone() * &b).unwrap();
+            let mut c = (&a * &b).unwrap();
+            // c.to_dense();
             // Error matrix initialized to 0s
             let e = Matrix::zero(n, n);
+
             // Random challenge
             let rE = (0..2 * log2(n))
                 .map(|_| C::ScalarField::rand(rng))
@@ -86,22 +91,20 @@ fn bench_mova_matrix(c: &mut Criterion) {
                         let mut acc = instances.pop().unwrap();
 
                         for _ in 0..*count {
-                            let next = instances.pop().unwrap();
+                            let mut next = instances.pop().unwrap();
                             total_duration += {
                                 let timer = Instant::now();
-                                let (wit_acc, inst_acc, _) = NIFS::<
-                                    Projective,
-                                    Pedersen<Projective>,
-                                    PoseidonSponge<Fr>,
-                                >::prove(
-                                    &mut transcript_p,
-                                    pp_hash,
-                                    &next.0,
-                                    &next.1,
-                                    &acc.0,
-                                    &acc.1,
-                                )
-                                .unwrap();
+
+                                let (wit_acc, inst_acc, _) =
+                                    NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
+                                        &mut transcript_p,
+                                        pp_hash,
+                                        &mut next.0,
+                                        &next.1,
+                                        &acc.0,
+                                        &acc.1,
+                                    )
+                                        .unwrap();
                                 let time = timer.elapsed();
                                 acc = (wit_acc, inst_acc);
                                 time
