@@ -8,6 +8,7 @@ use crate::{Curve, Error};
 pub mod ipa;
 pub mod kzg;
 pub mod pedersen;
+mod hyrax;
 
 /// CommitmentScheme defines the vector commitment scheme trait. Where `H` indicates if to use the
 /// commitment in hiding mode or not.
