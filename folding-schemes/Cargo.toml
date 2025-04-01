@@ -24,6 +24,8 @@ num-integer = "0.1"
 sha3 = "0.10"
 log = "0.4"
 matrex = {git = "ssh://git@github.com/NethermindEth/matrex.git", features = ["parallel"]}
+chacha = "0.4.0"
+rand_chacha = "0.3.1"
 
 
 [dev-dependencies]
