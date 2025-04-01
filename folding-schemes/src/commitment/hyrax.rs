@@ -120,11 +120,14 @@ mod tests {
         assert_eq!(matrix_dimensions(4), (4, 4));
         assert_eq!(matrix_dimensions(6), (8, 8));
 
-        let num_vars = 200; // Very large number of variables
+        let num_vars = 30; // Very large number of variables
         let (cols, rows) = matrix_dimensions(num_vars);
 
         let expected_left = num_vars / 2;
         let expected_right = num_vars - expected_left;
+
+        assert_eq!(cols, 1 << expected_left);
+        assert_eq!(rows, 1 << expected_right);
     }
 
     #[test]
