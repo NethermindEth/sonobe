@@ -104,6 +104,57 @@ impl<C: Curve> Hyrax<C> {
             .map(|chunk| chunk.to_vec())
             .collect())
     }
+
+    pub fn commit_sparse_matrix(
+        indices_values: &[(usize, C::ScalarField)],
+        gens: &HyraxGenerators<C>,
+    ) -> Result<Vec<C>, Error> {
+        // deduce the highest index to figure out n
+        let max_index = indices_values
+            .iter()
+            .map(|(pos, _)| *pos)
+            .max().unwrap();
+        let n = max_index + 1; // since indices are 0-based
+
+        // same logic for computing ell
+        let ell = if n.is_power_of_two() {
+            (1usize.leading_zeros() - n.leading_zeros()) as usize
+        } else {
+            (0usize.leading_zeros() - n.leading_zeros()) as usize
+        };
+        let (L_size, R_size) = matrix_dimensions(ell);
+
+        // For each row i in [0..L_size], gather all (pos, val) where row_start <= pos < row_end
+        // and do a "sparse" Pedersen commit using the row‐local indices (pos - row_start).
+        let row_commitments: Vec<C> = (0..L_size)
+            .into_par_iter()
+            .map(|row_idx| {
+                let row_start = row_idx * R_size;
+                let row_end = row_start + R_size;
+
+                // gather the pairs that fall in row i
+                let row_sparse: Vec<(usize, C::ScalarField)> = indices_values
+                    .iter()
+                    .filter_map(|(pos, val)| {
+                        if *pos >= row_start && *pos < row_end {
+                            // shift the index for the row commit
+                            Some((pos - row_start, *val))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                Pedersen::<C, false>::commit_sparse(
+                    &gens.pedersen_generators,
+                    &row_sparse,
+                    &C::ScalarField::zero(),
+                )
+            })
+            .collect::<Result<Vec<C>, _>>()?;
+
+        Ok(row_commitments)
+    }
 }
 
 #[cfg(test)]
