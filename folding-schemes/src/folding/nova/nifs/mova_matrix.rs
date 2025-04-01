@@ -38,9 +38,11 @@ impl<C: Curve> Absorb for RelaxedCommittedRelation<C> {
     }
 
     fn to_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
-        // self.cmA.to_native_sponge_field_elements(dest);
-        // self.cmB.to_native_sponge_field_elements(dest);
-        // self.cmC.to_native_sponge_field_elements(dest);
+        for i in 0..self.cmA.len() {
+            self.cmA[i].to_native_sponge_field_elements(dest);
+            self.cmB[i].to_native_sponge_field_elements(dest);
+            self.cmC[i].to_native_sponge_field_elements(dest);
+        }
         self.u.to_sponge_field_elements(dest);
         self.mleE.to_sponge_field_elements(dest);
         self.rE.to_sponge_field_elements(dest);
@@ -410,21 +412,6 @@ impl<C: Curve, T: Transcript<C::ScalarField>, const H: bool> NIFS<C, T, H> {
         dense_a.to_dense();
         dense_b.to_dense();
         dense_c.to_dense();
-        // let com_a = CS::commit(
-        //     params,
-        //     dense_a.as_dense_slice().unwrap(),
-        //     &C::ScalarField::zero(),
-        // )?;
-        // let com_b = CS::commit(
-        //     params,
-        //     dense_b.as_dense_slice().unwrap(),
-        //     &C::ScalarField::zero(),
-        // )?;
-        // let com_c = CS::commit(
-        //     params,
-        //     dense_c.as_dense_slice().unwrap(),
-        //     &C::ScalarField::zero(),
-        // )?;
         let com_a = Hyrax::commit(dense_a.as_dense_slice().unwrap(), params)?;
         let com_b = Hyrax::commit(dense_b.as_dense_slice().unwrap(), params)?;
         let com_c = Hyrax::commit(dense_c.as_dense_slice().unwrap(), params)?;
@@ -520,7 +507,7 @@ pub mod tests {
         let mat_dim = 4; // 4x4 matrices
 
         // Set up transcript and commitment scheme
-        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, mat_dim *mat_dim);
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim *mat_dim) as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
@@ -579,7 +566,7 @@ pub mod tests {
         let mat_dim = 16; // 16x16 matrices
 
         // Set up transcript and commitment scheme
-        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, mat_dim *mat_dim);
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim *mat_dim) as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
