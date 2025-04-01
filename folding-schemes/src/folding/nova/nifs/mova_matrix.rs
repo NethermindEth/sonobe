@@ -100,23 +100,22 @@ impl<C: Curve> Witness<C> {
             let mle = MultilinearExtension::from_evaluations(&self.E, log2(self.E.len()) as usize);
             mleE = mle.evaluate(&rE);
         }
-        // Right now we are ignoring the hiding property and directly commit to the matrices
         let com_a = Hyrax::commit(self.A.as_dense_slice().unwrap(), params)?;
         let com_b = Hyrax::commit(self.B.as_dense_slice().unwrap(), params)?;
-        // let com_c = if self.C.is_dense() {
-        //     <CS as CommitmentScheme<C, false>>::commit(
-        //         params,
-        //         self.C.as_dense_slice().unwrap(),
-        //         &C::ScalarField::zero(),
-        //     )?
-        // } else {
-        //     CS::commit_sparse(
-        //         params,
-        //         self.C.as_sparse_slice().unwrap(),
-        //         &C::ScalarField::zero(),
-        //     )?
-        // };
         let com_c = Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?;
+
+        // let a_slice = self.A.as_dense_slice().unwrap();
+        // let b_slice = self.B.as_dense_slice().unwrap();
+        // let c_slice = self.C.as_dense_slice().unwrap();
+        //
+        // let slices = [a_slice, b_slice, c_slice];
+        //
+        // let mut all_commitments = Hyrax::batch_commit(&slices, params)?;
+        //
+        // let mut commitments_iter = all_commitments.into_iter();
+        // let com_a = commitments_iter.next().expect("Expected commitments for A");
+        // let com_b = commitments_iter.next().expect("Expected commitments for B");
+        // let com_c = commitments_iter.next().expect("Expected commitments for C");
 
         Ok(RelaxedCommittedRelation {
             cmA: com_a,

@@ -13,9 +13,9 @@ use crate::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use crate::{Curve, Error};
 
 /// Taken from jolt but we assume ratio is 1 since we are dealing with square matrices
-fn matrix_dimensions(num_vars: usize) -> (usize, usize) {
-    let left_num_vars = num_vars / 2;
-    let right_num_vars = num_vars - left_num_vars;
+fn matrix_dimensions(num_elems: usize) -> (usize, usize) {
+    let left_num_vars = num_elems / 2;
+    let right_num_vars = num_elems - left_num_vars;
 
     let col_size = 2_usize.pow(left_num_vars as u32);
     let row_size = 2_usize.pow(right_num_vars as u32);

@@ -11,6 +11,7 @@ use folding_schemes::Curve;
 use matrex::Matrix;
 use rand::{Rng, RngCore};
 use std::time::{Duration, Instant};
+use folding_schemes::commitment::hyrax::HyraxGenerators;
 
 const NUM_OF_PRECONDITION_FOLDS: &[usize] = &[1, 10, 20, 40];
 
@@ -27,24 +28,22 @@ fn random_sparse_matrix<C: Curve>(n: usize, rng: &mut impl RngCore) -> Matrix<C:
 }
 
 // Helper functions
-fn get_instances<C: Curve, CS: CommitmentScheme<C> + NethermindCommitmentScheme<C>>(
+fn get_instances<C: Curve>(
     num: usize,
     n: usize,
     rng: &mut impl RngCore,
-    params: &CS::ProverParams,
+    params: &HyraxGenerators<C>,
 ) -> Vec<(Witness<C>, RelaxedCommittedRelation<C>)> {
     (0..num)
         .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
             // A matrix
-            let a = random_sparse_matrix::<C>(n, rng);
-            // println!("Size of `a` by value: {} bytes", size_of_val(&a));
-            // println!("Size of `scalar` by value: {} bytes",size_of::<C::ScalarField>());
-
+            let mut a = random_sparse_matrix::<C>(n, rng);
+            a.to_dense();
             // B matrix
-            let b = random_sparse_matrix::<C>(n, rng);
+            let mut b = random_sparse_matrix::<C>(n, rng);
+            b.to_dense();
             // C = A * B matrix
-            let mut c = (&a * &b).unwrap();
-            // c.to_dense();
+            let c = (&a * &b).unwrap();
             // Error matrix initialized to 0s
             let e = Matrix::zero(n, n);
 
@@ -54,7 +53,7 @@ fn get_instances<C: Curve, CS: CommitmentScheme<C> + NethermindCommitmentScheme<
                 .collect();
             // Witness
             let witness = Witness::new::<false>(a, b, c, e);
-            let instance = witness.commit::<CS, false>(params, rE).unwrap();
+            let instance = witness.commit(params, rE).unwrap();
             (witness, instance)
         })
         .collect()
@@ -70,8 +69,7 @@ fn bench_mova_matrix(c: &mut Criterion) {
             .measurement_time(Duration::from_secs(20 * (*count as u64)))
             .bench_function(&format!("{count}"), |b| {
                 // Set up transcript and commitment scheme
-                let (pedersen_params, _) =
-                    Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
+                let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim *mat_dim) as usize);
                 let poseidon_config = poseidon_canonical_config::<Fr>();
                 let pp_hash = Fr::rand(&mut rng);
 
@@ -81,11 +79,11 @@ fn bench_mova_matrix(c: &mut Criterion) {
                         let mut instances: Vec<(
                             Witness<Projective>,
                             RelaxedCommittedRelation<Projective>,
-                        )> = get_instances::<Projective, Pedersen<Projective>>(
+                        )> = get_instances::<Projective>(
                             count + 1, // we want the number of folds plus one for the acc_instance
                             mat_dim,
                             &mut rng,
-                            &pedersen_params,
+                            &hyrax_params,
                         );
                         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
                         let mut acc = instances.pop().unwrap();
@@ -97,7 +95,6 @@ fn bench_mova_matrix(c: &mut Criterion) {
 
                                 let (wit_acc, inst_acc, _) = NIFS::<
                                     Projective,
-                                    Pedersen<Projective>,
                                     PoseidonSponge<Fr>,
                                 >::prove(
                                     &mut transcript_p,
