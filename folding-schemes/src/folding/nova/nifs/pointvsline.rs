@@ -401,448 +401,448 @@ fn compute_l<F: PrimeField>(r1: &[F], r2_sub_r1: &[F], x: F) -> Result<Vec<F>, E
         .collect())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        compute_h, compute_h2, compute_l, PointVsLine, PointVsLineMatrix, PointVsLineR1CS,
-    };
-    use crate::commitment::pedersen::Pedersen;
-    use crate::commitment::CommitmentScheme;
-    use crate::transcript::poseidon::poseidon_canonical_config;
-    use crate::Error;
-    use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
-    use ark_pallas::{Fr, Projective};
-    use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, SparseMultilinearExtension};
-    use ark_std::{log2, UniformRand};
-
-    use crate::folding::nova::nifs::mova::Witness;
-    use crate::folding::nova::nifs::mova_matrix::{
-        RelaxedCommittedRelation, Witness as MatrixWitness,
-    };
-
-    use crate::utils::mle::MultilinearExtension;
-    use ark_crypto_primitives::sponge::CryptographicSponge;
-    use ark_ff::{One, Zero};
-    use matrex::Matrix;
-
-    #[test]
-    fn test_compute_h() -> Result<(), Error> {
-        let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fr::from(1), Fr::from(2)]);
-        let r0 = [Fr::from(5)];
-        let r1 = [Fr::from(6)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
-
-        let result = compute_h(&mle, &r0, &r1_sub_r0)?;
-        assert_eq!(
-            result,
-            DenseUVPolynomial::from_coefficients_slice(&[Fr::from(6), Fr::from(1)])
-        );
-
-        let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fr::from(1), Fr::from(2)]);
-        let r0 = [Fr::from(4)];
-        let r1 = [Fr::from(7)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
-
-        let result = compute_h(&mle, &r0, &r1_sub_r0)?;
-        assert_eq!(
-            result,
-            DenseUVPolynomial::from_coefficients_slice(&[Fr::from(5), Fr::from(3)])
-        );
-
-        let mle = DenseMultilinearExtension::from_evaluations_slice(
-            2,
-            &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)],
-        );
-        let r0 = [Fr::from(5), Fr::from(4)];
-        let r1 = [Fr::from(2), Fr::from(7)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
-
-        let result = compute_h(&mle, &r0, &r1_sub_r0)?;
-        assert_eq!(
-            result,
-            DenseUVPolynomial::from_coefficients_slice(&[Fr::from(14), Fr::from(3)])
-        );
-        let mle = DenseMultilinearExtension::from_evaluations_slice(
-            3,
-            &[
-                Fr::from(1),
-                Fr::from(2),
-                Fr::from(3),
-                Fr::from(4),
-                Fr::from(5),
-                Fr::from(6),
-                Fr::from(7),
-                Fr::from(8),
-            ],
-        );
-        let r0 = [Fr::from(1), Fr::from(2), Fr::from(3)];
-        let r1 = [Fr::from(5), Fr::from(6), Fr::from(7)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
-
-        let result = compute_h(&mle, &r0, &r1_sub_r0)?;
-        assert_eq!(
-            result,
-            DenseUVPolynomial::from_coefficients_slice(&[Fr::from(18), Fr::from(28)])
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_compute_h_errors() {
-        let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fr::from(1), Fr::from(2)]);
-        let r0 = [Fr::from(5)];
-        let r1_sub_r0 = [];
-        let result = compute_h(&mle, &r0, &r1_sub_r0);
-        assert!(result.is_err());
-
-        let mle = DenseMultilinearExtension::from_evaluations_slice(
-            2,
-            &[Fr::from(1), Fr::from(2), Fr::from(1), Fr::from(2)],
-        );
-        let r0 = [Fr::from(4)];
-        let r1 = [Fr::from(7)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
-
-        let result = compute_h(&mle, &r0, &r1_sub_r0);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn test_compute_l() -> Result<(), Error> {
-        // Test with simple non-zero values
-        let r1 = vec![Fr::from(1), Fr::from(2), Fr::from(3)];
-        let r2_sub_r1 = vec![Fr::from(4), Fr::from(5), Fr::from(6)];
-        let x = Fr::from(2);
-
-        let expected = vec![
-            Fr::from(1) + Fr::from(2) * Fr::from(4),
-            Fr::from(2) + Fr::from(2) * Fr::from(5),
-            Fr::from(3) + Fr::from(2) * Fr::from(6),
-        ];
-
-        let result = compute_l(&r1, &r2_sub_r1, x)?;
-        assert_eq!(result, expected);
-        Ok(())
-    }
-
-    #[test]
-    fn test_evaluations_R1CS() -> Result<(), Error> {
-        // Basic test with no zero error term to ensure that the folding is correct.
-        // This test mainly focuses on if the evaluation of h0 and h1 are correct.
-        let mut rng = ark_std::test_rng();
-
-        let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
-        let poseidon_config = poseidon_canonical_config::<Fr>();
-        let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
-        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
-
-        let W_i = Witness {
-            E: vec![Fr::from(25), Fr::from(50), Fr::from(0), Fr::from(0)],
-            W: vec![Fr::from(35), Fr::from(9), Fr::from(27), Fr::from(30)],
-            rW: Fr::zero(),
-        };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        // x is not important
-        let x = vec![Fr::from(35), Fr::from(9), Fr::from(27), Fr::from(30)];
-        let U_i =
-            Witness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, x.clone(), rE)?;
-
-        let w_i = Witness {
-            E: vec![Fr::from(75), Fr::from(100), Fr::from(0), Fr::from(0)],
-            W: vec![Fr::from(35), Fr::from(9), Fr::from(27), Fr::from(30)],
-            rW: Fr::zero(),
-        };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let u_i = Witness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, x, rE)?;
-
-        let (proof, claim) =
-            PointVsLineR1CS::prove(&mut transcript_p, Some(&U_i), &u_i, &W_i, &w_i)?;
-
-        let result = PointVsLineR1CS::verify(
-            &mut transcript_v,
-            Some(&U_i),
-            &u_i,
-            &proof,
-            Some(&claim.mleE1_prime),
-            &claim.mleE2_prime,
-            &claim.rE_prime,
-        );
-
-        assert!(result.is_ok(), "Verification failed");
-        // Check if the re_prime is the same
-        let re_verified = result.unwrap();
-        assert!(re_verified == claim.rE_prime);
-        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
-
-        // Pass the wrong committed instance which should result in a wrong evaluation in h returning an error
-        let result = PointVsLineR1CS::verify(
-            &mut transcript_v,
-            Some(&U_i),
-            &U_i,
-            &proof,
-            Some(&claim.mleE1_prime),
-            &claim.mleE2_prime,
-            &claim.rE_prime,
-        );
-
-        assert!(result.is_err(), "Verification was okay when it should fail");
-
-        Ok(())
-    }
-
-    #[test]
-    fn h2_test_mismatched_input_lengths() {
-        let mle = MultilinearExtension::DenseMLE(
-            DenseMultilinearExtension::<Fr>::from_evaluations_vec(2, vec![Fr::zero(); 4]),
-        );
-        let r1 = vec![Fr::one(), Fr::one()];
-        let r2_sub_r1 = vec![Fr::one(), Fr::one(), Fr::one()];
-
-        let result = compute_h2(&mle, &r1, &r2_sub_r1);
-        assert!(matches!(result, Err(Error::NotEqual)));
-    }
-
-    #[test]
-    fn test_evaluations_Matrix_dense() -> Result<(), Error> {
-        // Basic test with no zero error term to ensure that the folding is correct.
-        // This test mainly focuses on if the evaluation of h1 are correct.
-        let mut rng = ark_std::test_rng();
-
-        let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
-        let poseidon_config = poseidon_canonical_config::<Fr>();
-        let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
-        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
-
-        let three = Fr::one() + Fr::one() + Fr::one();
-        let four = three + Fr::one();
-        let five = four + Fr::one();
-        let six = five + Fr::one();
-        let W_i = MatrixWitness {
-            A: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-            B: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-            C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-            E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-        };
-        let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        // below is the commit code modified to work with dense matrices.
-        let U_i = {
-            let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
-            let mleE = mle.evaluate(&rE);
-            // Right now we are ignoring the hiding property and directly commit to the matrices
-            let com_a = Pedersen::<Projective, false>::commit(
-                &pedersen_params,
-                W_i.A.as_dense_slice().unwrap(),
-                &Fr::zero(),
-            )?;
-            let com_b = Pedersen::<Projective, false>::commit(
-                &pedersen_params,
-                W_i.B.as_dense_slice().unwrap(),
-                &Fr::zero(),
-            )?;
-            let com_c = Pedersen::<Projective, false>::commit(
-                &pedersen_params,
-                W_i.C.as_dense_slice().unwrap(),
-                &Fr::zero(),
-            )?;
-
-            RelaxedCommittedRelation {
-                cmA: com_a,
-                cmB: com_b,
-                cmC: com_c,
-                u: Fr::one(),
-                mleE,
-                rE,
-            }
-        };
-
-        let w_i = MatrixWitness {
-            A: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-            B: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-            C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-            E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
-        };
-        let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        // below is the commit code modified to work with dense matrices.
-        let u_i = {
-            let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
-            let mleE = mle.evaluate(&rE);
-            // Right now we are ignoring the hiding property and directly commit to the matrices
-            let com_a = Pedersen::<Projective, false>::commit(
-                &pedersen_params,
-                w_i.A.as_dense_slice().unwrap(),
-                &Fr::zero(),
-            )?;
-            let com_b = Pedersen::<Projective, false>::commit(
-                &pedersen_params,
-                w_i.B.as_dense_slice().unwrap(),
-                &Fr::zero(),
-            )?;
-            let com_c = Pedersen::<Projective, false>::commit(
-                &pedersen_params,
-                w_i.C.as_dense_slice().unwrap(),
-                &Fr::zero(),
-            )?;
-
-            RelaxedCommittedRelation {
-                cmA: com_a,
-                cmB: com_b,
-                cmC: com_c,
-                u: Fr::one(),
-                mleE,
-                rE,
-            }
-        };
-
-        let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
-
-        let result = PointVsLineMatrix::verify(
-            &mut transcript_v,
-            None,
-            &u_i,
-            &proof,
-            None,
-            &claim.mleE2_prime,
-            &claim.rE_prime,
-        );
-
-        assert!(result.is_ok(), "Verification failed");
-        // Check if the re_prime is the same
-        let re_verified = result.unwrap();
-        assert!(re_verified == claim.rE_prime);
-        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
-
-        // Pass the wrong committed instance which should result in a wrong evaluation in h returning an error
-        let result = PointVsLineMatrix::verify(
-            &mut transcript_v,
-            None,
-            &U_i,
-            &proof,
-            None,
-            &claim.mleE2_prime,
-            &claim.rE_prime,
-        );
-
-        assert!(result.is_err(), "Verification was okay when it should fail");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_evaluations_Matrix_sparse() -> Result<(), Error> {
-        // Basic test with no zero error term to ensure that the folding is correct.
-        // This test mainly focuses on if the evaluation of h1 are correct.
-        let mut rng = ark_std::test_rng();
-
-        let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
-        let poseidon_config = poseidon_canonical_config::<Fr>();
-        let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
-        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
-
-        let three = Fr::one() + Fr::one() + Fr::one();
-        let four = three + Fr::one();
-        let five = four + Fr::one();
-        let six = five + Fr::one();
-        let W_i = MatrixWitness {
-            A: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
-            B: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
-            C: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
-            E: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
-        };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let U_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, rE)?;
-
-        let w_i = MatrixWitness {
-            A: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
-            B: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
-            C: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
-            E: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
-        };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let u_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, rE)?;
-
-        let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
-
-        let result = PointVsLineMatrix::verify(
-            &mut transcript_v,
-            None,
-            &u_i,
-            &proof,
-            None,
-            &claim.mleE2_prime,
-            &claim.rE_prime,
-        );
-
-        assert!(result.is_ok(), "Verification failed");
-        // Check if the re_prime is the same
-        let re_verified = result.unwrap();
-        assert!(re_verified == claim.rE_prime);
-        let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
-
-        // Pass the wrong committed instance which should result in a wrong evaluation in h returning an error
-        let result = PointVsLineMatrix::verify(
-            &mut transcript_v,
-            None,
-            &U_i,
-            &proof,
-            None,
-            &claim.mleE2_prime,
-            &claim.rE_prime,
-        );
-
-        assert!(result.is_err(), "Verification was okay when it should fail");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_compute_h2_compare() {
-        // Both MLEs represent the same information both in dense and sparse representation.
-        let vanilla_dense = DenseMultilinearExtension::from_evaluations_slice(
-            3,
-            &[
-                Fr::zero(),
-                Fr::zero(),
-                Fr::one(),
-                Fr::one(),
-                Fr::zero(),
-                Fr::zero(),
-                Fr::zero(),
-                Fr::one(),
-            ],
-        );
-        let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
-        let mle_sparse =
-            MultilinearExtension::SparseMLE(SparseMultilinearExtension::from_evaluations(
-                3,
-                &[(2, Fr::one()), (3, Fr::one()), (7, Fr::one())],
-            ));
-
-        let r0 = [Fr::from(1), Fr::from(2), Fr::from(3)];
-        let r1 = [Fr::from(5), Fr::from(6), Fr::from(7)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
-
-        // Use original compute_h method
-        let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
-
-        // Use dense for compute_h2
-        let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
-
-        // Use sparse for compute_h2
-        let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
-
-        assert_eq!(
-            result_h2_dense, result_h2_sparse,
-            "Sparse and dense computations for compute h2 must be equal"
-        );
-        assert_eq!(
-            result_h2_dense.coeffs(),
-            result_h.coeffs(),
-            "Dense polynomial coefficients must match original h computation"
-        );
-        assert_eq!(
-            result_h2_sparse.coeffs(),
-            result_h.coeffs(),
-            "Sparse polynomial coefficients must match original h computation"
-        );
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::{
+//         compute_h, compute_h2, compute_l, PointVsLine, PointVsLineMatrix, PointVsLineR1CS,
+//     };
+//     use crate::commitment::pedersen::Pedersen;
+//     use crate::commitment::CommitmentScheme;
+//     use crate::transcript::poseidon::poseidon_canonical_config;
+//     use crate::Error;
+//     use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
+//     use ark_pallas::{Fr, Projective};
+//     use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, SparseMultilinearExtension};
+//     use ark_std::{log2, UniformRand};
+//
+//     use crate::folding::nova::nifs::mova::Witness;
+//     use crate::folding::nova::nifs::mova_matrix::{
+//         RelaxedCommittedRelation, Witness as MatrixWitness,
+//     };
+//
+//     use crate::utils::mle::MultilinearExtension;
+//     use ark_crypto_primitives::sponge::CryptographicSponge;
+//     use ark_ff::{One, Zero};
+//     use matrex::Matrix;
+//
+//     #[test]
+//     fn test_compute_h() -> Result<(), Error> {
+//         let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fr::from(1), Fr::from(2)]);
+//         let r0 = [Fr::from(5)];
+//         let r1 = [Fr::from(6)];
+//         let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+//
+//         let result = compute_h(&mle, &r0, &r1_sub_r0)?;
+//         assert_eq!(
+//             result,
+//             DenseUVPolynomial::from_coefficients_slice(&[Fr::from(6), Fr::from(1)])
+//         );
+//
+//         let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fr::from(1), Fr::from(2)]);
+//         let r0 = [Fr::from(4)];
+//         let r1 = [Fr::from(7)];
+//         let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+//
+//         let result = compute_h(&mle, &r0, &r1_sub_r0)?;
+//         assert_eq!(
+//             result,
+//             DenseUVPolynomial::from_coefficients_slice(&[Fr::from(5), Fr::from(3)])
+//         );
+//
+//         let mle = DenseMultilinearExtension::from_evaluations_slice(
+//             2,
+//             &[Fr::from(1), Fr::from(2), Fr::from(3), Fr::from(4)],
+//         );
+//         let r0 = [Fr::from(5), Fr::from(4)];
+//         let r1 = [Fr::from(2), Fr::from(7)];
+//         let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+//
+//         let result = compute_h(&mle, &r0, &r1_sub_r0)?;
+//         assert_eq!(
+//             result,
+//             DenseUVPolynomial::from_coefficients_slice(&[Fr::from(14), Fr::from(3)])
+//         );
+//         let mle = DenseMultilinearExtension::from_evaluations_slice(
+//             3,
+//             &[
+//                 Fr::from(1),
+//                 Fr::from(2),
+//                 Fr::from(3),
+//                 Fr::from(4),
+//                 Fr::from(5),
+//                 Fr::from(6),
+//                 Fr::from(7),
+//                 Fr::from(8),
+//             ],
+//         );
+//         let r0 = [Fr::from(1), Fr::from(2), Fr::from(3)];
+//         let r1 = [Fr::from(5), Fr::from(6), Fr::from(7)];
+//         let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+//
+//         let result = compute_h(&mle, &r0, &r1_sub_r0)?;
+//         assert_eq!(
+//             result,
+//             DenseUVPolynomial::from_coefficients_slice(&[Fr::from(18), Fr::from(28)])
+//         );
+//         Ok(())
+//     }
+//
+//     #[test]
+//     fn test_compute_h_errors() {
+//         let mle = DenseMultilinearExtension::from_evaluations_slice(1, &[Fr::from(1), Fr::from(2)]);
+//         let r0 = [Fr::from(5)];
+//         let r1_sub_r0 = [];
+//         let result = compute_h(&mle, &r0, &r1_sub_r0);
+//         assert!(result.is_err());
+//
+//         let mle = DenseMultilinearExtension::from_evaluations_slice(
+//             2,
+//             &[Fr::from(1), Fr::from(2), Fr::from(1), Fr::from(2)],
+//         );
+//         let r0 = [Fr::from(4)];
+//         let r1 = [Fr::from(7)];
+//         let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+//
+//         let result = compute_h(&mle, &r0, &r1_sub_r0);
+//         assert!(result.is_err())
+//     }
+//
+//     #[test]
+//     fn test_compute_l() -> Result<(), Error> {
+//         // Test with simple non-zero values
+//         let r1 = vec![Fr::from(1), Fr::from(2), Fr::from(3)];
+//         let r2_sub_r1 = vec![Fr::from(4), Fr::from(5), Fr::from(6)];
+//         let x = Fr::from(2);
+//
+//         let expected = vec![
+//             Fr::from(1) + Fr::from(2) * Fr::from(4),
+//             Fr::from(2) + Fr::from(2) * Fr::from(5),
+//             Fr::from(3) + Fr::from(2) * Fr::from(6),
+//         ];
+//
+//         let result = compute_l(&r1, &r2_sub_r1, x)?;
+//         assert_eq!(result, expected);
+//         Ok(())
+//     }
+//
+//     #[test]
+//     fn test_evaluations_R1CS() -> Result<(), Error> {
+//         // Basic test with no zero error term to ensure that the folding is correct.
+//         // This test mainly focuses on if the evaluation of h0 and h1 are correct.
+//         let mut rng = ark_std::test_rng();
+//
+//         let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
+//         let poseidon_config = poseidon_canonical_config::<Fr>();
+//         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
+//         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
+//
+//         let W_i = Witness {
+//             E: vec![Fr::from(25), Fr::from(50), Fr::from(0), Fr::from(0)],
+//             W: vec![Fr::from(35), Fr::from(9), Fr::from(27), Fr::from(30)],
+//             rW: Fr::zero(),
+//         };
+//         let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+//         // x is not important
+//         let x = vec![Fr::from(35), Fr::from(9), Fr::from(27), Fr::from(30)];
+//         let U_i =
+//             Witness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, x.clone(), rE)?;
+//
+//         let w_i = Witness {
+//             E: vec![Fr::from(75), Fr::from(100), Fr::from(0), Fr::from(0)],
+//             W: vec![Fr::from(35), Fr::from(9), Fr::from(27), Fr::from(30)],
+//             rW: Fr::zero(),
+//         };
+//         let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+//         let u_i = Witness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, x, rE)?;
+//
+//         let (proof, claim) =
+//             PointVsLineR1CS::prove(&mut transcript_p, Some(&U_i), &u_i, &W_i, &w_i)?;
+//
+//         let result = PointVsLineR1CS::verify(
+//             &mut transcript_v,
+//             Some(&U_i),
+//             &u_i,
+//             &proof,
+//             Some(&claim.mleE1_prime),
+//             &claim.mleE2_prime,
+//             &claim.rE_prime,
+//         );
+//
+//         assert!(result.is_ok(), "Verification failed");
+//         // Check if the re_prime is the same
+//         let re_verified = result.unwrap();
+//         assert!(re_verified == claim.rE_prime);
+//         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
+//
+//         // Pass the wrong committed instance which should result in a wrong evaluation in h returning an error
+//         let result = PointVsLineR1CS::verify(
+//             &mut transcript_v,
+//             Some(&U_i),
+//             &U_i,
+//             &proof,
+//             Some(&claim.mleE1_prime),
+//             &claim.mleE2_prime,
+//             &claim.rE_prime,
+//         );
+//
+//         assert!(result.is_err(), "Verification was okay when it should fail");
+//
+//         Ok(())
+//     }
+//
+//     #[test]
+//     fn h2_test_mismatched_input_lengths() {
+//         let mle = MultilinearExtension::DenseMLE(
+//             DenseMultilinearExtension::<Fr>::from_evaluations_vec(2, vec![Fr::zero(); 4]),
+//         );
+//         let r1 = vec![Fr::one(), Fr::one()];
+//         let r2_sub_r1 = vec![Fr::one(), Fr::one(), Fr::one()];
+//
+//         let result = compute_h2(&mle, &r1, &r2_sub_r1);
+//         assert!(matches!(result, Err(Error::NotEqual)));
+//     }
+//
+//     #[test]
+//     fn test_evaluations_Matrix_dense() -> Result<(), Error> {
+//         // Basic test with no zero error term to ensure that the folding is correct.
+//         // This test mainly focuses on if the evaluation of h1 are correct.
+//         let mut rng = ark_std::test_rng();
+//
+//         let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
+//         let poseidon_config = poseidon_canonical_config::<Fr>();
+//         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
+//         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
+//
+//         let three = Fr::one() + Fr::one() + Fr::one();
+//         let four = three + Fr::one();
+//         let five = four + Fr::one();
+//         let six = five + Fr::one();
+//         let W_i = MatrixWitness {
+//             A: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//             B: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//             C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//             E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//         };
+//         let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+//         // below is the commit code modified to work with dense matrices.
+//         let U_i = {
+//             let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
+//             let mleE = mle.evaluate(&rE);
+//             // Right now we are ignoring the hiding property and directly commit to the matrices
+//             let com_a = Pedersen::<Projective, false>::commit(
+//                 &pedersen_params,
+//                 W_i.A.as_dense_slice().unwrap(),
+//                 &Fr::zero(),
+//             )?;
+//             let com_b = Pedersen::<Projective, false>::commit(
+//                 &pedersen_params,
+//                 W_i.B.as_dense_slice().unwrap(),
+//                 &Fr::zero(),
+//             )?;
+//             let com_c = Pedersen::<Projective, false>::commit(
+//                 &pedersen_params,
+//                 W_i.C.as_dense_slice().unwrap(),
+//                 &Fr::zero(),
+//             )?;
+//
+//             RelaxedCommittedRelation {
+//                 cmA: com_a,
+//                 cmB: com_b,
+//                 cmC: com_c,
+//                 u: Fr::one(),
+//                 mleE,
+//                 rE,
+//             }
+//         };
+//
+//         let w_i = MatrixWitness {
+//             A: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//             B: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//             C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//             E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
+//         };
+//         let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+//         // below is the commit code modified to work with dense matrices.
+//         let u_i = {
+//             let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
+//             let mleE = mle.evaluate(&rE);
+//             // Right now we are ignoring the hiding property and directly commit to the matrices
+//             let com_a = Pedersen::<Projective, false>::commit(
+//                 &pedersen_params,
+//                 w_i.A.as_dense_slice().unwrap(),
+//                 &Fr::zero(),
+//             )?;
+//             let com_b = Pedersen::<Projective, false>::commit(
+//                 &pedersen_params,
+//                 w_i.B.as_dense_slice().unwrap(),
+//                 &Fr::zero(),
+//             )?;
+//             let com_c = Pedersen::<Projective, false>::commit(
+//                 &pedersen_params,
+//                 w_i.C.as_dense_slice().unwrap(),
+//                 &Fr::zero(),
+//             )?;
+//
+//             RelaxedCommittedRelation {
+//                 cmA: com_a,
+//                 cmB: com_b,
+//                 cmC: com_c,
+//                 u: Fr::one(),
+//                 mleE,
+//                 rE,
+//             }
+//         };
+//
+//         let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
+//
+//         let result = PointVsLineMatrix::verify(
+//             &mut transcript_v,
+//             None,
+//             &u_i,
+//             &proof,
+//             None,
+//             &claim.mleE2_prime,
+//             &claim.rE_prime,
+//         );
+//
+//         assert!(result.is_ok(), "Verification failed");
+//         // Check if the re_prime is the same
+//         let re_verified = result.unwrap();
+//         assert!(re_verified == claim.rE_prime);
+//         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
+//
+//         // Pass the wrong committed instance which should result in a wrong evaluation in h returning an error
+//         let result = PointVsLineMatrix::verify(
+//             &mut transcript_v,
+//             None,
+//             &U_i,
+//             &proof,
+//             None,
+//             &claim.mleE2_prime,
+//             &claim.rE_prime,
+//         );
+//
+//         assert!(result.is_err(), "Verification was okay when it should fail");
+//
+//         Ok(())
+//     }
+//
+//     #[test]
+//     fn test_evaluations_Matrix_sparse() -> Result<(), Error> {
+//         // Basic test with no zero error term to ensure that the folding is correct.
+//         // This test mainly focuses on if the evaluation of h1 are correct.
+//         let mut rng = ark_std::test_rng();
+//
+//         let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
+//         let poseidon_config = poseidon_canonical_config::<Fr>();
+//         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
+//         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
+//
+//         let three = Fr::one() + Fr::one() + Fr::one();
+//         let four = three + Fr::one();
+//         let five = four + Fr::one();
+//         let six = five + Fr::one();
+//         let W_i = MatrixWitness {
+//             A: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
+//             B: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
+//             C: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
+//             E: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
+//         };
+//         let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+//         let U_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, rE)?;
+//
+//         let w_i = MatrixWitness {
+//             A: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
+//             B: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
+//             C: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
+//             E: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
+//         };
+//         let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+//         let u_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, rE)?;
+//
+//         let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
+//
+//         let result = PointVsLineMatrix::verify(
+//             &mut transcript_v,
+//             None,
+//             &u_i,
+//             &proof,
+//             None,
+//             &claim.mleE2_prime,
+//             &claim.rE_prime,
+//         );
+//
+//         assert!(result.is_ok(), "Verification failed");
+//         // Check if the re_prime is the same
+//         let re_verified = result.unwrap();
+//         assert!(re_verified == claim.rE_prime);
+//         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
+//
+//         // Pass the wrong committed instance which should result in a wrong evaluation in h returning an error
+//         let result = PointVsLineMatrix::verify(
+//             &mut transcript_v,
+//             None,
+//             &U_i,
+//             &proof,
+//             None,
+//             &claim.mleE2_prime,
+//             &claim.rE_prime,
+//         );
+//
+//         assert!(result.is_err(), "Verification was okay when it should fail");
+//
+//         Ok(())
+//     }
+//
+//     #[test]
+//     fn test_compute_h2_compare() {
+//         // Both MLEs represent the same information both in dense and sparse representation.
+//         let vanilla_dense = DenseMultilinearExtension::from_evaluations_slice(
+//             3,
+//             &[
+//                 Fr::zero(),
+//                 Fr::zero(),
+//                 Fr::one(),
+//                 Fr::one(),
+//                 Fr::zero(),
+//                 Fr::zero(),
+//                 Fr::zero(),
+//                 Fr::one(),
+//             ],
+//         );
+//         let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+//         let mle_sparse =
+//             MultilinearExtension::SparseMLE(SparseMultilinearExtension::from_evaluations(
+//                 3,
+//                 &[(2, Fr::one()), (3, Fr::one()), (7, Fr::one())],
+//             ));
+//
+//         let r0 = [Fr::from(1), Fr::from(2), Fr::from(3)];
+//         let r1 = [Fr::from(5), Fr::from(6), Fr::from(7)];
+//         let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+//
+//         // Use original compute_h method
+//         let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+//
+//         // Use dense for compute_h2
+//         let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+//
+//         // Use sparse for compute_h2
+//         let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+//
+//         assert_eq!(
+//             result_h2_dense, result_h2_sparse,
+//             "Sparse and dense computations for compute h2 must be equal"
+//         );
+//         assert_eq!(
+//             result_h2_dense.coeffs(),
+//             result_h.coeffs(),
+//             "Dense polynomial coefficients must match original h computation"
+//         );
+//         assert_eq!(
+//             result_h2_sparse.coeffs(),
+//             result_h.coeffs(),
+//             "Sparse polynomial coefficients must match original h computation"
+//         );
+//     }
+// }

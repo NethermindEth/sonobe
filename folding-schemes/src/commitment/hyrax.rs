@@ -17,10 +17,10 @@ fn matrix_dimensions(num_vars: usize) -> (usize, usize) {
     let left_num_vars = num_vars / 2;
     let right_num_vars = num_vars - left_num_vars;
 
-    let col_size = 2_i32.pow(left_num_vars as u32);
-    let row_size = 2_i32.pow(right_num_vars as u32);
+    let col_size = 2_usize.pow(left_num_vars as u32);
+    let row_size = 2_usize.pow(right_num_vars as u32);
 
-    (col_size as usize, row_size as usize)
+    (col_size , row_size)
 }
 
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize, Debug)]
@@ -119,6 +119,12 @@ mod tests {
         assert_eq!(matrix_dimensions(2), (2, 2));
         assert_eq!(matrix_dimensions(4), (4, 4));
         assert_eq!(matrix_dimensions(6), (8, 8));
+
+        let num_vars = 200; // Very large number of variables
+        let (cols, rows) = matrix_dimensions(num_vars);
+
+        let expected_left = num_vars / 2;
+        let expected_right = num_vars - expected_left;
     }
 
     #[test]
