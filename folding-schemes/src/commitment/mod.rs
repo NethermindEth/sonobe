@@ -5,6 +5,7 @@ use ark_std::rand::RngCore;
 use crate::transcript::Transcript;
 use crate::{Curve, Error};
 
+pub mod hyrax;
 pub mod ipa;
 pub mod kzg;
 pub mod pedersen;
