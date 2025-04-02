@@ -70,8 +70,8 @@ fn bench_mova_matrix(c: &mut Criterion) {
             .measurement_time(Duration::from_secs(20 * (*count as u64)))
             .bench_function(&format!("{count}"), |b| {
                 // Set up transcript and commitment scheme
-                let (pedersen_params, _) =
-                    Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
+                let pedersen_params =
+                    Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
                 let poseidon_config = poseidon_canonical_config::<Fr>();
                 let pp_hash = Fr::rand(&mut rng);
 
