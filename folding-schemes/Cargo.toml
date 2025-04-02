@@ -75,6 +75,11 @@ name = "mova_matrix"
 path = "../benches/mova_matrix.rs"
 harness = false
 
+[[bench]]
+name = "commitment_schemes"
+path = "../benches/commitment_schemes.rs"
+harness = false
+
 [[example]]
 name = "sha256"
 path = "../examples/sha256.rs"

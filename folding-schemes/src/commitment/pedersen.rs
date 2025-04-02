@@ -184,20 +184,24 @@ impl<C: Curve, const H: bool> NethermindCommitmentScheme<C, H> for Pedersen<C, H
         v: &[(usize, C::ScalarField)],
         r: &C::ScalarField,
     ) -> Result<C, Error> {
-        let (selected_generators, values): (Vec<_>, Vec<_>) = v
-            .iter()
-            .map(|(i, val)| (params.generators[*i], *val))
-            .unzip();
-
-        let msm_result = C::msm_unchecked(&selected_generators, &values);
-
-        if !H {
-            if !r.is_zero() {
-                return Err(Error::BlindingNotZero);
-            }
-            Ok(msm_result)
+        if v.is_empty() {
+            Ok(C::zero())
         } else {
-            Ok(params.h.mul(r) + msm_result)
+            let (selected_generators, values): (Vec<_>, Vec<_>) = v
+                .iter()
+                .map(|(i, val)| (params.generators[*i], *val))
+                .unzip();
+
+            let msm_result = C::msm_unchecked(&selected_generators, &values);
+
+            if !H {
+                if !r.is_zero() {
+                    return Err(Error::BlindingNotZero);
+                }
+                Ok(msm_result)
+            } else {
+                Ok(params.h.mul(r) + msm_result)
+            }
         }
     }
 

@@ -19,7 +19,7 @@ fn matrix_dimensions(num_elems: usize) -> (usize, usize) {
     let col_size = 2_usize.pow(left_num_vars as u32);
     let row_size = 2_usize.pow(right_num_vars as u32);
 
-    (col_size , row_size)
+    (col_size, row_size)
 }
 
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize, Debug)]
