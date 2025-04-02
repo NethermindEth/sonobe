@@ -184,6 +184,9 @@ impl<C: Curve, const H: bool> NethermindCommitmentScheme<C, H> for Pedersen<C, H
         v: &[(usize, C::ScalarField)],
         r: &C::ScalarField,
     ) -> Result<C, Error> {
+        if v.is_empty() {
+            return Ok(C::zero());
+        };
         let (selected_generators, values): (Vec<_>, Vec<_>) = v
             .iter()
             .map(|(i, val)| (params.generators[*i], *val))
