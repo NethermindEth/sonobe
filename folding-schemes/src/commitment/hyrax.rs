@@ -116,7 +116,6 @@ impl<C: Curve> Hyrax<C> {
             .max().unwrap();
         let n = max_index + 1; // since indices are 0-based
 
-        // same logic for computing ell
         let ell = if n.is_power_of_two() {
             (1usize.leading_zeros() - n.leading_zeros()) as usize
         } else {
