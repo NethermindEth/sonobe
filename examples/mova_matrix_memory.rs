@@ -6,8 +6,8 @@ use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
-use folding_schemes::{Curve};
-use matrex::{Matrix};
+use folding_schemes::Curve;
+use matrex::Matrix;
 use rand::{Rng, RngCore};
 use std::alloc::GlobalAlloc;
 use std::time::{Duration, Instant};
@@ -63,7 +63,8 @@ fn bench_mova_matrix() {
     for count in NUM_OF_PRECONDITION_FOLDS {
         println!("Starting with pedersen setup");
 
-        let pedersen_params = Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
+        let pedersen_params =
+            Pedersen::<Projective>::setup_prover(&mut rng, mat_dim * mat_dim).unwrap();
 
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let pp_hash = Fr::rand(&mut rng);

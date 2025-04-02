@@ -37,14 +37,11 @@ fn get_instances<C: Curve, CS: CommitmentScheme<C> + NethermindCommitmentScheme<
         .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
             // A matrix
             let a = random_sparse_matrix::<C>(n, rng);
-            // println!("Size of `a` by value: {} bytes", size_of_val(&a));
-            // println!("Size of `scalar` by value: {} bytes",size_of::<C::ScalarField>());
 
             // B matrix
             let b = random_sparse_matrix::<C>(n, rng);
             // C = A * B matrix
-            let mut c = (&a * &b).unwrap();
-            // c.to_dense();
+            let c = (&a * &b).unwrap();
             // Error matrix initialized to 0s
             let e = Matrix::zero(n, n);
 
@@ -71,7 +68,7 @@ fn bench_mova_matrix(c: &mut Criterion) {
             .bench_function(&format!("{count}"), |b| {
                 // Set up transcript and commitment scheme
                 let pedersen_params =
-                    Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
+                    Pedersen::<Projective>::setup_prover(&mut rng, mat_dim * mat_dim).unwrap();
                 let poseidon_config = poseidon_canonical_config::<Fr>();
                 let pp_hash = Fr::rand(&mut rng);
 

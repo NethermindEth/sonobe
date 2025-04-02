@@ -199,17 +199,12 @@ impl<
         acc_wit: &Witness<C>,            // Accumulated witness
         mut aux: Matrix<C::ScalarField>, // T in Mova's notation
     ) -> Result<Witness<C>, Error> {
-        // println!("1 {:?}", simple_wit.A);
         simple_wit.A *= alpha;
         simple_wit.B *= alpha;
         simple_wit.C *= alpha;
         aux *= alpha;
-        // println!("2 {:?}", simple_wit.A);
 
         let a_acc = (&simple_wit.A + &acc_wit.A).unwrap();
-        // println!("3 {:?}", simple_wit.A);
-        // println!("4 {:?}", a_acc);
-
         let b_acc = (&simple_wit.B + &acc_wit.B).unwrap();
         let c_acc = (&simple_wit.C + &acc_wit.C).unwrap();
         let e_acc = (aux + &acc_wit.E).unwrap();
@@ -513,7 +508,8 @@ pub mod tests {
         let mat_dim = 4; // 4x4 matrices
 
         // Set up transcript and commitment scheme
-        let pedersen_params = Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
+        let pedersen_params =
+            Pedersen::<Projective>::setup_prover(&mut rng, mat_dim * mat_dim).unwrap();
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
@@ -573,7 +569,8 @@ pub mod tests {
         let mat_dim = 16; // 16x16 matrices
 
         // Set up transcript and commitment scheme
-        let pedersen_params = Pedersen::<Projective>::setup2(&mut rng, mat_dim * mat_dim).unwrap();
+        let pedersen_params =
+            Pedersen::<Projective>::setup_prover(&mut rng, mat_dim * mat_dim).unwrap();
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
