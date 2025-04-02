@@ -100,10 +100,27 @@ impl<C: Curve> Witness<C> {
             let mle = MultilinearExtension::from_evaluations(&self.E, log2(self.E.len()) as usize);
             mleE = mle.evaluate(&rE);
         }
-        let com_a = Hyrax::commit(self.A.as_dense_slice().unwrap(), params)?;
-        let com_b = Hyrax::commit(self.B.as_dense_slice().unwrap(), params)?;
-        let com_c = Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?;
+        // Simple Dense Commit
+        // let com_a = Hyrax::commit(self.A.as_dense_slice().unwrap(), params)?;
+        // let com_b = Hyrax::commit(self.B.as_dense_slice().unwrap(), params)?;
+        // let com_c = Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?;
 
+        // Sparse commit
+        let com_a = Hyrax::commit_sparse_matrix(self.A.as_sparse_slice().unwrap(), params)?;
+        let com_b = Hyrax::commit_sparse_matrix(self.B.as_sparse_slice().unwrap(), params)?;
+        let com_c = if self.C.is_dense() {
+            Hyrax::commit(
+                self.C.as_dense_slice().unwrap(),
+                params
+            )?
+        } else {
+            Hyrax::commit_sparse_matrix(
+                self.C.as_sparse_slice().unwrap(),
+                params
+            )?
+        };
+
+        // Batch dense commit
         // let a_slice = self.A.as_dense_slice().unwrap();
         // let b_slice = self.B.as_dense_slice().unwrap();
         // let c_slice = self.C.as_dense_slice().unwrap();
@@ -478,10 +495,10 @@ pub mod tests {
             .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
                 // A matrix
                 let mut a = random_sparse_matrix::<C>(n, rng);
-                a.to_dense();
+                // a.to_dense();
                 // B matrix
                 let mut b = random_sparse_matrix::<C>(n, rng);
-                b.to_dense();
+                // b.to_dense();
                 // C = A * B matrix
                 let c = (&a * &b).unwrap();
                 // Error matrix initialized to 0s
