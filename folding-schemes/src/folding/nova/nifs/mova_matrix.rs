@@ -3,7 +3,7 @@ use crate::commitment::hyrax::{Hyrax, HyraxGenerators};
 /// Mova-like folding for matrix multiplications as described in "Folding and Lookup Arguments for Proving Inference of Deep Learning Models" by Nethermind Research
 /// Currently, we are not interested in the hiding properties, so we ignore the hiding factors and focus on the succinctness property.
 /// Please note the code could be easily extended so support hiding.
-use crate::commitment::{CommitmentScheme, NethermindCommitmentScheme};
+use crate::commitment::{CommitmentScheme};
 use crate::folding::nova::nifs::pointvsline::{
     PointVsLine, PointVsLineEvaluationClaimMatrix, PointVsLineMatrix, PointVsLineProofMatrix,
 };
@@ -199,17 +199,12 @@ impl<C: Curve, T: Transcript<C::ScalarField>, const H: bool> NIFS<C, T, H> {
         acc_wit: &Witness<C>,            // Accumulated witness
         mut aux: Matrix<C::ScalarField>, // T in Mova's notation
     ) -> Result<Witness<C>, Error> {
-        // println!("1 {:?}", simple_wit.A);
         simple_wit.A *= alpha;
         simple_wit.B *= alpha;
         simple_wit.C *= alpha;
         aux *= alpha;
-        // println!("2 {:?}", simple_wit.A);
 
         let a_acc = (&simple_wit.A + &acc_wit.A).unwrap();
-        // println!("3 {:?}", simple_wit.A);
-        // println!("4 {:?}", a_acc);
-
         let b_acc = (&simple_wit.B + &acc_wit.B).unwrap();
         let c_acc = (&simple_wit.C + &acc_wit.C).unwrap();
         let e_acc = (aux + &acc_wit.E).unwrap();
@@ -465,7 +460,6 @@ impl<C: Curve, T: Transcript<C::ScalarField>, const H: bool> NIFS<C, T, H> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::commitment::pedersen::Pedersen;
     use crate::transcript::poseidon::poseidon_canonical_config;
     use ark_crypto_primitives::sponge::{poseidon::PoseidonSponge, CryptographicSponge};
     use ark_pallas::{Fr, Projective};

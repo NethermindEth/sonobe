@@ -1,5 +1,4 @@
-use ark_ec::AffineRepr;
-use ark_ff::{Field, Zero};
+use ark_ff::{Zero};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::iterable::Iterable;
 use ark_std::rand::RngCore;
@@ -36,7 +35,7 @@ pub struct Hyrax<C: Curve> {
 impl<C: Curve> HyraxGenerators<C> {
     pub fn setup(rng: impl RngCore, len: usize) -> Self {
         let (_col_len, row_len) = matrix_dimensions(len);
-        let gens = Pedersen::<C, false>::setup2(rng, row_len).unwrap();
+        let gens = Pedersen::<C, false>::setup_prover(rng, row_len).unwrap();
         HyraxGenerators {
             pedersen_generators: gens,
         }

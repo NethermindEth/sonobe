@@ -37,11 +37,9 @@ fn get_instances<C: Curve>(
     (0..num)
         .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
             // A matrix
-            let mut a = random_sparse_matrix::<C>(n, rng);
-            a.to_dense();
+            let a = random_sparse_matrix::<C>(n, rng);
             // B matrix
-            let mut b = random_sparse_matrix::<C>(n, rng);
-            b.to_dense();
+            let b = random_sparse_matrix::<C>(n, rng);
             // C = A * B matrix
             let c = (&a * &b).unwrap();
             // Error matrix initialized to 0s

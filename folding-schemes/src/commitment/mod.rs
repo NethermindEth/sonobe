@@ -76,7 +76,7 @@ pub trait NethermindCommitmentScheme<C: Curve, const H: bool = false>:
         v: &[(usize, C::ScalarField)],
         r: &C::ScalarField,
     ) -> Result<C, Error>;
-    fn setup2(rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error>;
+    fn setup_prover(rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error>;
 }
 #[cfg(test)]
 mod tests {

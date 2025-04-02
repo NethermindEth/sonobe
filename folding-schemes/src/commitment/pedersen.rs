@@ -201,7 +201,7 @@ impl<C: Curve, const H: bool> NethermindCommitmentScheme<C, H> for Pedersen<C, H
         }
     }
 
-    fn setup2(mut rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error> {
+    fn setup_prover(mut rng: impl RngCore, len: usize) -> Result<Self::ProverParams, Error> {
         // Pre-calculate the size and pre-allocate the vector capacity
         let size = len.next_power_of_two();
 
