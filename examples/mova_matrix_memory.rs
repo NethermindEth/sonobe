@@ -3,14 +3,11 @@ use ark_crypto_primitives::sponge::CryptographicSponge;
 use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
 use folding_schemes::commitment::hyrax::HyraxGenerators;
-use folding_schemes::commitment::pedersen::Pedersen;
-use folding_schemes::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::Curve;
 use matrex::Matrix;
 use rand::{Rng, RngCore};
-use std::alloc::GlobalAlloc;
 use std::time::{Duration, Instant};
 
 const NUM_OF_PRECONDITION_FOLDS: &[usize] = &[1];
@@ -68,7 +65,7 @@ fn get_instances<C: Curve>(
 
 fn bench_mova_matrix() {
     let mut rng = ark_std::test_rng();
-    let mat_dim = 1 << 15; // 4x4 matrices
+    let mat_dim = 1 << 2; // 4x4 matrices
     println!("mat_dim {}", mat_dim);
     for count in NUM_OF_PRECONDITION_FOLDS {
         println!("Starting with pedersen setup");

@@ -99,7 +99,7 @@ impl<C: Curve> Witness<C> {
             let mle = MultilinearExtension::from_evaluations(&self.E, log2(self.E.len()) as usize);
             mleE = mle.evaluate(&rE);
         }
-        // There are three versions of commiting for hyrax.
+        // There are three versions of committing for hyrax.
         // 1. Simple Dense Commit 2. Sparse Commit 3. Batch dense commit
         // Simple Dense Commit
         // let com_a = Hyrax::commit(self.A.as_dense_slice().unwrap(), params)?;
