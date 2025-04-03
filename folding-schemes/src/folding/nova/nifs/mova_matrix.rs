@@ -3,7 +3,6 @@ use crate::commitment::hyrax::{Hyrax, HyraxGenerators};
 /// Mova-like folding for matrix multiplications as described in "Folding and Lookup Arguments for Proving Inference of Deep Learning Models" by Nethermind Research
 /// Currently, we are not interested in the hiding properties, so we ignore the hiding factors and focus on the succinctness property.
 /// Please note the code could be easily extended so support hiding.
-use crate::commitment::{CommitmentScheme};
 use crate::folding::nova::nifs::pointvsline::{
     PointVsLine, PointVsLineEvaluationClaimMatrix, PointVsLineMatrix, PointVsLineProofMatrix,
 };
@@ -100,6 +99,8 @@ impl<C: Curve> Witness<C> {
             let mle = MultilinearExtension::from_evaluations(&self.E, log2(self.E.len()) as usize);
             mleE = mle.evaluate(&rE);
         }
+        // There are three versions of commiting for hyrax.
+        // 1. Simple Dense Commit 2. Sparse Commit 3. Batch dense commit
         // Simple Dense Commit
         // let com_a = Hyrax::commit(self.A.as_dense_slice().unwrap(), params)?;
         // let com_b = Hyrax::commit(self.B.as_dense_slice().unwrap(), params)?;
@@ -488,10 +489,10 @@ pub mod tests {
         (0..num)
             .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
                 // A matrix
-                let mut a = random_sparse_matrix::<C>(n, rng);
+                let a = random_sparse_matrix::<C>(n, rng);
                 // a.to_dense();
                 // B matrix
-                let mut b = random_sparse_matrix::<C>(n, rng);
+                let b = random_sparse_matrix::<C>(n, rng);
                 // b.to_dense();
                 // C = A * B matrix
                 let c = (&a * &b).unwrap();

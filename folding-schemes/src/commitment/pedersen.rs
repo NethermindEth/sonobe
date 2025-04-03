@@ -61,6 +61,9 @@ impl<C: Curve, const H: bool> CommitmentScheme<C, H> for Pedersen<C, H> {
         v: &[C::ScalarField],
         r: &C::ScalarField, // blinding factor
     ) -> Result<C, Error> {
+        if v.is_empty() {
+            return Ok(C::zero());
+        }
         if params.generators.len() < v.len() {
             return Err(Error::PedersenParamsLen(params.generators.len(), v.len()));
         }
