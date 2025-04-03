@@ -1,4 +1,4 @@
-use ark_ff::{Zero};
+use ark_ff::Zero;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::iterable::Iterable;
 use ark_std::rand::RngCore;
@@ -19,7 +19,7 @@ fn matrix_dimensions(num_elems: usize) -> (usize, usize) {
     let col_size = 2_usize.pow(left_num_vars as u32);
     let row_size = 2_usize.pow(right_num_vars as u32);
 
-    (col_size , row_size)
+    (col_size, row_size)
 }
 
 #[derive(Clone, CanonicalSerialize, CanonicalDeserialize, Debug)]
@@ -109,10 +109,7 @@ impl<C: Curve> Hyrax<C> {
         gens: &HyraxGenerators<C>,
     ) -> Result<Vec<C>, Error> {
         // deduce the highest index to figure out n
-        let max_index = indices_values
-            .iter()
-            .map(|(pos, _)| *pos)
-            .max().unwrap();
+        let max_index = indices_values.iter().map(|(pos, _)| *pos).max().unwrap();
         let n = max_index + 1; // since indices are 0-based
 
         let ell = if n.is_power_of_two() {

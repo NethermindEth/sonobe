@@ -3,6 +3,7 @@ use ark_crypto_primitives::sponge::CryptographicSponge;
 use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
 use criterion::{criterion_group, criterion_main, Criterion};
+use folding_schemes::commitment::hyrax::HyraxGenerators;
 use folding_schemes::commitment::pedersen::Pedersen;
 use folding_schemes::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
@@ -11,7 +12,6 @@ use folding_schemes::Curve;
 use matrex::Matrix;
 use rand::{Rng, RngCore};
 use std::time::{Duration, Instant};
-use folding_schemes::commitment::hyrax::HyraxGenerators;
 
 const NUM_OF_PRECONDITION_FOLDS: &[usize] = &[1, 10, 20, 40];
 
@@ -67,7 +67,10 @@ fn bench_mova_matrix(c: &mut Criterion) {
             .measurement_time(Duration::from_secs(20 * (*count as u64)))
             .bench_function(&format!("{count}"), |b| {
                 // Set up transcript and commitment scheme
-                let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim *mat_dim) as usize);
+                let hyrax_params = HyraxGenerators::<Projective>::setup(
+                    &mut rng,
+                    log2(mat_dim * mat_dim) as usize,
+                );
                 let poseidon_config = poseidon_canonical_config::<Fr>();
                 let pp_hash = Fr::rand(&mut rng);
 
@@ -91,18 +94,16 @@ fn bench_mova_matrix(c: &mut Criterion) {
                             total_duration += {
                                 let timer = Instant::now();
 
-                                let (wit_acc, inst_acc, _) = NIFS::<
-                                    Projective,
-                                    PoseidonSponge<Fr>,
-                                >::prove(
-                                    &mut transcript_p,
-                                    pp_hash,
-                                    &mut next.0,
-                                    &next.1,
-                                    &acc.0,
-                                    &acc.1,
-                                )
-                                .unwrap();
+                                let (wit_acc, inst_acc, _) =
+                                    NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+                                        &mut transcript_p,
+                                        pp_hash,
+                                        &mut next.0,
+                                        &next.1,
+                                        &acc.0,
+                                        &acc.1,
+                                    )
+                                    .unwrap();
                                 let time = timer.elapsed();
                                 acc = (wit_acc, inst_acc);
                                 time

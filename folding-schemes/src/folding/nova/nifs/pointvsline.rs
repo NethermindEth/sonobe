@@ -420,11 +420,11 @@ mod tests {
         RelaxedCommittedRelation, Witness as MatrixWitness,
     };
 
+    use crate::commitment::hyrax::{Hyrax, HyraxGenerators};
     use crate::utils::mle::MultilinearExtension;
     use ark_crypto_primitives::sponge::CryptographicSponge;
     use ark_ff::{One, Zero};
     use matrex::Matrix;
-    use crate::commitment::hyrax::{Hyrax, HyraxGenerators};
 
     #[test]
     fn test_compute_h() -> Result<(), Error> {

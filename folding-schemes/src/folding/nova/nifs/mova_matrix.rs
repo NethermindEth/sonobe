@@ -23,9 +23,9 @@ use num_integer::Roots;
 /// When u=1 and E is the zero matrix, we have the simple committed relation in which A * B = C.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RelaxedCommittedRelation<C: Curve> {
-    pub cmA: Vec<C>,           // Commitment to matrix A. cmA = commitment(A).
-    pub cmB: Vec<C>,           // Commitment to matrix B. cmB = commitment(B).
-    pub cmC: Vec<C>,           // Commitment to matrix C. cmC = commitment(C).
+    pub cmA: Vec<C>,             // Commitment to matrix A. cmA = commitment(A).
+    pub cmB: Vec<C>,             // Commitment to matrix B. cmB = commitment(B).
+    pub cmC: Vec<C>,             // Commitment to matrix C. cmC = commitment(C).
     pub u: C::ScalarField,       // Scalar used in the folding.
     pub mleE: C::ScalarField, // v = mle[E](rE) in MOVA notation. Multilinear extension of matrix E evaluated at random point rE.
     pub rE: Vec<C::ScalarField>, // Random point where MLE is evaluated. Size of 2 * log2(n).
@@ -110,15 +110,9 @@ impl<C: Curve> Witness<C> {
         let com_a = Hyrax::commit_sparse_matrix(self.A.as_sparse_slice().unwrap(), params)?;
         let com_b = Hyrax::commit_sparse_matrix(self.B.as_sparse_slice().unwrap(), params)?;
         let com_c = if self.C.is_dense() {
-            Hyrax::commit(
-                self.C.as_dense_slice().unwrap(),
-                params
-            )?
+            Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?
         } else {
-            Hyrax::commit_sparse_matrix(
-                self.C.as_sparse_slice().unwrap(),
-                params
-            )?
+            Hyrax::commit_sparse_matrix(self.C.as_sparse_slice().unwrap(), params)?
         };
 
         // Batch dense commit
@@ -428,7 +422,6 @@ impl<C: Curve, T: Transcript<C::ScalarField>, const H: bool> NIFS<C, T, H> {
         let com_b = Hyrax::commit(dense_b.as_dense_slice().unwrap(), params)?;
         let com_c = Hyrax::commit(dense_c.as_dense_slice().unwrap(), params)?;
 
-
         let AB = (&witness.A * &witness.B).unwrap();
 
         let uc = witness.C.clone() * instance.u;
@@ -518,34 +511,29 @@ pub mod tests {
         let mat_dim = 4; // 4x4 matrices
 
         // Set up transcript and commitment scheme
-        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim *mat_dim) as usize);
+        let hyrax_params =
+            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
         let pp_hash = Fr::rand(&mut rng);
 
         let mut instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
-            get_instances::<Projective>(
-                n_instances,
-                mat_dim,
-                &mut rng,
-                &hyrax_params,
-            );
+            get_instances::<Projective>(n_instances, mat_dim, &mut rng, &hyrax_params);
 
         let (left, right) = instances.split_at_mut(1);
         let (ref mut simple_w, ref simple_i) = &mut left[0];
         let (ref acc_w, ref acc_i) = &mut right[0];
 
-        let (wit_acc, inst_acc, proof) =
-            NIFS::<Projective, PoseidonSponge<Fr>>::prove(
-                &mut transcript_p,
-                pp_hash,
-                simple_w,
-                &simple_i,
-                &acc_w,
-                &acc_i,
-            )
-            .unwrap();
+        let (wit_acc, inst_acc, proof) = NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+            &mut transcript_p,
+            pp_hash,
+            simple_w,
+            &simple_i,
+            &acc_w,
+            &acc_i,
+        )
+        .unwrap();
 
         // Verify
         let (ci_verify, _) = NIFS::<Projective, PoseidonSponge<Fr>>::verify(
@@ -560,12 +548,8 @@ pub mod tests {
         // Ensure they match
         assert_eq!(inst_acc, ci_verify);
 
-        NIFS::<Projective, PoseidonSponge<Fr>>::check_relation(
-            &wit_acc,
-            &inst_acc,
-            &hyrax_params,
-        )
-        .expect("Relationship check failed");
+        NIFS::<Projective, PoseidonSponge<Fr>>::check_relation(&wit_acc, &inst_acc, &hyrax_params)
+            .expect("Relationship check failed");
     }
 
     #[test]
@@ -577,19 +561,15 @@ pub mod tests {
         let mat_dim = 16; // 16x16 matrices
 
         // Set up transcript and commitment scheme
-        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim *mat_dim) as usize);
+        let hyrax_params =
+            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
         let pp_hash = Fr::rand(&mut rng);
 
         let mut instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
-            get_instances::<Projective>(
-                n_instances,
-                mat_dim,
-                &mut rng,
-                &hyrax_params,
-            );
+            get_instances::<Projective>(n_instances, mat_dim, &mut rng, &hyrax_params);
 
         // Keep track of the accumulated state
         let first_instance = instances.remove(0);
@@ -599,27 +579,25 @@ pub mod tests {
         // Fold through all remaining instances
         for (mut next_w, next_i) in instances {
             // Fold
-            let (wit_acc, inst_acc, proof) =
-                NIFS::<Projective, PoseidonSponge<Fr>>::prove(
-                    &mut transcript_p,
-                    pp_hash,
-                    &mut next_w,
-                    &next_i,
-                    &current_acc_wit,
-                    &current_acc_inst,
-                )
-                .unwrap();
+            let (wit_acc, inst_acc, proof) = NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+                &mut transcript_p,
+                pp_hash,
+                &mut next_w,
+                &next_i,
+                &current_acc_wit,
+                &current_acc_inst,
+            )
+            .unwrap();
 
             // Verify
-            let (ci_verify, _) =
-                NIFS::<Projective, PoseidonSponge<Fr>>::verify(
-                    &mut transcript_v,
-                    pp_hash,
-                    &next_i,
-                    &current_acc_inst,
-                    &proof,
-                )
-                .unwrap();
+            let (ci_verify, _) = NIFS::<Projective, PoseidonSponge<Fr>>::verify(
+                &mut transcript_v,
+                pp_hash,
+                &next_i,
+                &current_acc_inst,
+                &proof,
+            )
+            .unwrap();
 
             // Ensure they match
             assert_eq!(inst_acc, ci_verify);
