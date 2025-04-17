@@ -61,6 +61,9 @@ impl<C: Curve, const H: bool> CommitmentScheme<C, H> for Pedersen<C, H> {
         v: &[C::ScalarField],
         r: &C::ScalarField, // blinding factor
     ) -> Result<C, Error> {
+        if v.is_empty() {
+            return Ok(C::zero());
+        }
         if params.generators.len() < v.len() {
             return Err(Error::PedersenParamsLen(params.generators.len(), v.len()));
         }
@@ -185,23 +188,22 @@ impl<C: Curve, const H: bool> NethermindCommitmentScheme<C, H> for Pedersen<C, H
         r: &C::ScalarField,
     ) -> Result<C, Error> {
         if v.is_empty() {
-            Ok(C::zero())
-        } else {
-            let (selected_generators, values): (Vec<_>, Vec<_>) = v
-                .iter()
-                .map(|(i, val)| (params.generators[*i], *val))
-                .unzip();
+            return Ok(C::zero());
+        };
+        let (selected_generators, values): (Vec<_>, Vec<_>) = v
+            .iter()
+            .map(|(i, val)| (params.generators[*i], *val))
+            .unzip();
 
-            let msm_result = C::msm_unchecked(&selected_generators, &values);
+        let msm_result = C::msm_unchecked(&selected_generators, &values);
 
-            if !H {
-                if !r.is_zero() {
-                    return Err(Error::BlindingNotZero);
-                }
-                Ok(msm_result)
-            } else {
-                Ok(params.h.mul(r) + msm_result)
+        if !H {
+            if !r.is_zero() {
+                return Err(Error::BlindingNotZero);
             }
+            Ok(msm_result)
+        } else {
+            Ok(params.h.mul(r) + msm_result)
         }
     }
 
