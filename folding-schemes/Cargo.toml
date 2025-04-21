@@ -23,7 +23,7 @@ num-bigint = "0.4"
 num-integer = "0.1"
 sha3 = "0.10"
 log = "0.4"
-matrex = {git = "ssh://git@github.com/NethermindEth/matrex.git", tag = "v0.1.3", features = ["parallel"]}
+matrex = {git = "ssh://git@github.com/NethermindEth/matrex.git", features = ["parallel"]}
 
 
 [dev-dependencies]
@@ -75,6 +75,11 @@ name = "mova_matrix"
 path = "../benches/mova_matrix.rs"
 harness = false
 
+[[bench]]
+name = "commitment_schemes"
+path = "../benches/commitment_schemes.rs"
+harness = false
+
 [[example]]
 name = "sha256"
 path = "../examples/sha256.rs"
@@ -86,3 +91,9 @@ path = "../examples/multi_inputs.rs"
 [[example]]
 name = "external_inputs"
 path = "../examples/external_inputs.rs"
+
+
+[[example]]
+name = "mova_matrix"
+path = "../examples/mova_matrix_memory.rs"
+

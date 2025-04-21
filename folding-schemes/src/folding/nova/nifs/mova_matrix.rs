@@ -1,8 +1,8 @@
 #![allow(dead_code)]
+use crate::commitment::hyrax::{Hyrax, HyraxGenerators};
 /// Mova-like folding for matrix multiplications as described in "Folding and Lookup Arguments for Proving Inference of Deep Learning Models" by Nethermind Research
 /// Currently, we are not interested in the hiding properties, so we ignore the hiding factors and focus on the succinctness property.
 /// Please note the code could be easily extended so support hiding.
-use crate::commitment::CommitmentScheme;
 use crate::folding::nova::nifs::pointvsline::{
     PointVsLine, PointVsLineEvaluationClaimMatrix, PointVsLineMatrix, PointVsLineProofMatrix,
 };
@@ -23,9 +23,9 @@ use num_integer::Roots;
 /// When u=1 and E is the zero matrix, we have the simple committed relation in which A * B = C.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RelaxedCommittedRelation<C: Curve> {
-    pub cmA: C,                  // Commitment to matrix A. cmA = commitment(A).
-    pub cmB: C,                  // Commitment to matrix B. cmB = commitment(B).
-    pub cmC: C,                  // Commitment to matrix C. cmC = commitment(C).
+    pub cmA: Vec<C>,             // Commitment to matrix A. cmA = commitment(A).
+    pub cmB: Vec<C>,             // Commitment to matrix B. cmB = commitment(B).
+    pub cmC: Vec<C>,             // Commitment to matrix C. cmC = commitment(C).
     pub u: C::ScalarField,       // Scalar used in the folding.
     pub mleE: C::ScalarField, // v = mle[E](rE) in MOVA notation. Multilinear extension of matrix E evaluated at random point rE.
     pub rE: Vec<C::ScalarField>, // Random point where MLE is evaluated. Size of 2 * log2(n).
@@ -37,9 +37,11 @@ impl<C: Curve> Absorb for RelaxedCommittedRelation<C> {
     }
 
     fn to_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
-        self.cmA.to_native_sponge_field_elements(dest);
-        self.cmB.to_native_sponge_field_elements(dest);
-        self.cmC.to_native_sponge_field_elements(dest);
+        for i in 0..self.cmA.len() {
+            self.cmA[i].to_native_sponge_field_elements(dest);
+            self.cmB[i].to_native_sponge_field_elements(dest);
+            self.cmC[i].to_native_sponge_field_elements(dest);
+        }
         self.u.to_sponge_field_elements(dest);
         self.mleE.to_sponge_field_elements(dest);
         self.rE.to_sponge_field_elements(dest);
@@ -87,9 +89,9 @@ impl<C: Curve> Witness<C> {
     /// * `self` - Witness instance to be committed.
     /// * `params` - Commitment scheme parameters.
     /// * `rE` - Random evaluation point for the committed instance.
-    pub fn commit<CS: CommitmentScheme<C, H>, const H: bool>(
+    pub fn commit(
         &self,
-        params: &CS::ProverParams,
+        params: &HyraxGenerators<C>,
         rE: Vec<C::ScalarField>,
     ) -> Result<RelaxedCommittedRelation<C>, Error> {
         let mut mleE = C::ScalarField::zero();
@@ -97,29 +99,35 @@ impl<C: Curve> Witness<C> {
             let mle = MultilinearExtension::from_evaluations(&self.E, log2(self.E.len()) as usize);
             mleE = mle.evaluate(&rE);
         }
+        // There are three versions of committing for hyrax.
+        // 1. Simple Dense Commit 2. Sparse Commit 3. Batch dense commit
+        // Simple Dense Commit
+        // let com_a = Hyrax::commit(self.A.as_dense_slice().unwrap(), params)?;
+        // let com_b = Hyrax::commit(self.B.as_dense_slice().unwrap(), params)?;
+        // let com_c = Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?;
 
-        let mut dense_a = self.A.clone();
-        let mut dense_b = self.B.clone();
-        let mut dense_c = self.C.clone();
-        dense_a.to_dense();
-        dense_b.to_dense();
-        dense_c.to_dense();
-        // Right now we are ignoring the hiding property and directly commit to the matrices
-        let com_a = CS::commit(
-            params,
-            dense_a.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
-        let com_b = CS::commit(
-            params,
-            dense_b.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
-        let com_c = CS::commit(
-            params,
-            dense_c.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
+        // Sparse commit
+        let com_a = Hyrax::commit_sparse_matrix(self.A.as_sparse_slice().unwrap(), params)?;
+        let com_b = Hyrax::commit_sparse_matrix(self.B.as_sparse_slice().unwrap(), params)?;
+        let com_c = if self.C.is_dense() {
+            Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?
+        } else {
+            Hyrax::commit_sparse_matrix(self.C.as_sparse_slice().unwrap(), params)?
+        };
+
+        // Batch dense commit
+        // let a_slice = self.A.as_dense_slice().unwrap();
+        // let b_slice = self.B.as_dense_slice().unwrap();
+        // let c_slice = self.C.as_dense_slice().unwrap();
+        //
+        // let slices = [a_slice, b_slice, c_slice];
+        //
+        // let mut all_commitments = Hyrax::batch_commit(&slices, params)?;
+        //
+        // let mut commitments_iter = all_commitments.into_iter();
+        // let com_a = commitments_iter.next().expect("Expected commitments for A");
+        // let com_b = commitments_iter.next().expect("Expected commitments for B");
+        // let com_c = commitments_iter.next().expect("Expected commitments for C");
 
         Ok(RelaxedCommittedRelation {
             cmA: com_a,
@@ -148,20 +156,12 @@ pub struct Proof<C: Curve> {
 /// Implements the Non-Interactive Folding Scheme described in section 3.2 of the previous referenced article.
 /// `H` specifies whether the NIFS will use a blinding factor
 #[allow(clippy::upper_case_acronyms)]
-pub struct NIFS<
-    C: Curve,
-    CS: CommitmentScheme<C, H>,
-    T: Transcript<C::ScalarField>,
-    const H: bool = false,
-> {
+pub struct NIFS<C: Curve, T: Transcript<C::ScalarField>, const H: bool = false> {
     _c: PhantomData<C>,
-    _cp: PhantomData<CS>,
     _ct: PhantomData<T>,
 }
 
-impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const H: bool>
-    NIFS<C, CS, T, H>
-{
+impl<C: Curve, T: Transcript<C::ScalarField>, const H: bool> NIFS<C, T, H> {
     fn new_witness(
         a: Matrix<C::ScalarField>,
         b: Matrix<C::ScalarField>,
@@ -173,7 +173,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
 
     fn new_instance(
         mut rng: impl RngCore,
-        params: &CS::ProverParams,
+        params: &HyraxGenerators<C>,
         witness: Witness<C>,
         aux: Vec<C::ScalarField>, // rE in MOVA notation.
     ) -> Result<RelaxedCommittedRelation<C>, Error> {
@@ -184,20 +184,25 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
                 .map(|_| C::ScalarField::rand(&mut rng))
                 .collect();
         }
-        witness.commit::<CS, H>(params, rE)
+        witness.commit(params, rE)
     }
 
     // Protocol 5 - point 8 (Page 25)
     fn fold_witness(
-        alpha: C::ScalarField,       // Random challenge
-        simple_wit: &Witness<C>,     // Simple witness
-        acc_wit: &Witness<C>,        // Accumulated witness
-        aux: Matrix<C::ScalarField>, // T in Mova's notation
+        alpha: C::ScalarField,           // Random challenge
+        simple_wit: &mut Witness<C>,     // Simple witness
+        acc_wit: &Witness<C>,            // Accumulated witness
+        mut aux: Matrix<C::ScalarField>, // T in Mova's notation
     ) -> Result<Witness<C>, Error> {
-        let a_acc = ((simple_wit.A.clone() * alpha) + &acc_wit.A).unwrap();
-        let b_acc = ((simple_wit.B.clone() * alpha) + &acc_wit.B).unwrap();
-        let c_acc = ((simple_wit.C.clone() * alpha) + &acc_wit.C).unwrap();
-        let e_acc = ((aux * alpha) + acc_wit.E.clone()).unwrap();
+        simple_wit.A *= alpha;
+        simple_wit.B *= alpha;
+        simple_wit.C *= alpha;
+        aux *= alpha;
+
+        let a_acc = (&simple_wit.A + &acc_wit.A).unwrap();
+        let b_acc = (&simple_wit.B + &acc_wit.B).unwrap();
+        let c_acc = (&simple_wit.C + &acc_wit.C).unwrap();
+        let e_acc = (aux + &acc_wit.E).unwrap();
 
         Ok(Witness::<C> {
             A: a_acc,
@@ -214,7 +219,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
     pub fn prove(
         transcript: &mut T,
         pp_hash: C::ScalarField,
-        simple_witness: &Witness<C>,
+        simple_witness: &mut Witness<C>,
         simple_instance: &RelaxedCommittedRelation<C>,
         acc_witness: &Witness<C>,
         acc_instance: &RelaxedCommittedRelation<C>,
@@ -255,12 +260,12 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
         transcript.absorb(&mleE2_prime);
 
         // Compute cross term T
-        let A1B2 = (simple_witness.A.clone() * &acc_witness.B).unwrap();
+        let mut A1B2 = (&simple_witness.A * &acc_witness.B).unwrap(); // Representing A1B2A2B1 later
 
         let B1A2 = (&acc_witness.A * &simple_witness.B).unwrap();
-        let A1B2B1A2 = (A1B2 + B1A2).unwrap();
+        A1B2 += B1A2;
         let u2c1 = simple_witness.C.clone() * acc_instance.u;
-        let T: Matrix<C::ScalarField> = ((A1B2B1A2 - &acc_witness.C).unwrap() - u2c1).unwrap();
+        let T: Matrix<C::ScalarField> = ((A1B2 - &acc_witness.C).unwrap() - u2c1).unwrap();
 
         // Compute MLE_T
         let n_vars: usize = log2(simple_witness.E.len()) as usize;
@@ -338,9 +343,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
     }
 }
 
-impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const H: bool>
-    NIFS<C, CS, T, H>
-{
+impl<C: Curve, T: Transcript<C::ScalarField>, const H: bool> NIFS<C, T, H> {
     /// Folds two committed instances into a single one using the provided parameters
     /// Protocol 5 - Step 7 (page 25) for folding instances
     /// # Parameters
@@ -360,9 +363,30 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
     ) -> Result<RelaxedCommittedRelation<C>, Error> {
         // Step 7
         // Accumulate commitments
-        let com_a_acc = simple_instance.cmA.mul(alpha) + acc_instance.cmA;
-        let com_b_acc = simple_instance.cmB.mul(alpha) + acc_instance.cmB;
-        let com_c_acc = simple_instance.cmC.mul(alpha) + acc_instance.cmC;
+        // let com_a_acc = simple_instance.cmA.mul(alpha) + acc_instance.cmA;
+        // let com_b_acc = simple_instance.cmB.mul(alpha) + acc_instance.cmB;
+        // let com_c_acc = simple_instance.cmC.mul(alpha) + acc_instance.cmC;
+
+        let com_a_acc: Vec<_> = simple_instance
+            .cmA
+            .iter()
+            .zip(&acc_instance.cmA)
+            .map(|(a, b)| a.mul(alpha).add(b))
+            .collect();
+
+        let com_b_acc: Vec<_> = simple_instance
+            .cmB
+            .iter()
+            .zip(&acc_instance.cmB)
+            .map(|(a, b)| a.mul(alpha).add(b))
+            .collect();
+
+        let com_c_acc: Vec<_> = simple_instance
+            .cmC
+            .iter()
+            .zip(&acc_instance.cmC)
+            .map(|(a, b)| a.mul(alpha).add(b))
+            .collect();
 
         // Update scalars
         let u_acc = alpha + acc_instance.u;
@@ -386,7 +410,7 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
     fn check_relation(
         witness: &Witness<C>,
         instance: &RelaxedCommittedRelation<C>,
-        params: &CS::ProverParams,
+        params: &HyraxGenerators<C>,
     ) -> Result<(), Error> {
         let mut dense_a = witness.A.clone();
         let mut dense_b = witness.B.clone();
@@ -394,21 +418,9 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
         dense_a.to_dense();
         dense_b.to_dense();
         dense_c.to_dense();
-        let com_a = CS::commit(
-            params,
-            dense_a.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
-        let com_b = CS::commit(
-            params,
-            dense_b.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
-        let com_c = CS::commit(
-            params,
-            dense_c.as_dense_slice().unwrap(),
-            &C::ScalarField::zero(),
-        )?;
+        let com_a = Hyrax::commit(dense_a.as_dense_slice().unwrap(), params)?;
+        let com_b = Hyrax::commit(dense_b.as_dense_slice().unwrap(), params)?;
+        let com_c = Hyrax::commit(dense_c.as_dense_slice().unwrap(), params)?;
 
         let AB = (&witness.A * &witness.B).unwrap();
 
@@ -442,7 +454,6 @@ impl<C: Curve, CS: CommitmentScheme<C, H>, T: Transcript<C::ScalarField>, const 
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::commitment::pedersen::Pedersen;
     use crate::transcript::poseidon::poseidon_canonical_config;
     use ark_crypto_primitives::sponge::{poseidon::PoseidonSponge, CryptographicSponge};
     use ark_pallas::{Fr, Projective};
@@ -462,18 +473,20 @@ pub mod tests {
     }
 
     // Helper functions
-    fn get_instances<C: Curve, CS: CommitmentScheme<C>>(
+    fn get_instances<C: Curve>(
         num: usize,
         n: usize,
         rng: &mut impl RngCore,
-        params: &CS::ProverParams,
+        params: &HyraxGenerators<C>,
     ) -> Vec<(Witness<C>, RelaxedCommittedRelation<C>)> {
         (0..num)
             .map(|_| -> (Witness<C>, RelaxedCommittedRelation<C>) {
                 // A matrix
                 let a = random_sparse_matrix::<C>(n, rng);
+                // a.to_dense();
                 // B matrix
                 let b = random_sparse_matrix::<C>(n, rng);
+                // b.to_dense();
                 // C = A * B matrix
                 let c = (&a * &b).unwrap();
                 // Error matrix initialized to 0s
@@ -485,7 +498,7 @@ pub mod tests {
                     .collect();
                 // Witness
                 let witness = Witness::new::<false>(a, b, c, e);
-                let instance = witness.commit::<CS, false>(params, rE).unwrap();
+                let instance = witness.commit(params, rE).unwrap();
                 (witness, instance)
             })
             .collect()
@@ -498,54 +511,45 @@ pub mod tests {
         let mat_dim = 4; // 4x4 matrices
 
         // Set up transcript and commitment scheme
-        let (pedersen_params, _) =
-            Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
+        let hyrax_params =
+            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
         let pp_hash = Fr::rand(&mut rng);
 
-        let instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
-            get_instances::<Projective, Pedersen<Projective>>(
-                n_instances,
-                mat_dim,
-                &mut rng,
-                &pedersen_params,
-            );
+        let mut instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
+            get_instances::<Projective>(n_instances, mat_dim, &mut rng, &hyrax_params);
 
-        for i in 0..instances.len() - 1 {
-            // Fold
-            let (wit_acc, instance_acc, proof) =
-                NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
-                    &mut transcript_p,
-                    pp_hash,
-                    &instances[i].0,
-                    &instances[i].1,
-                    &instances[i + 1].0,
-                    &instances[i + 1].1,
-                )
-                .unwrap();
+        let (left, right) = instances.split_at_mut(1);
+        let (ref mut simple_w, ref simple_i) = &mut left[0];
+        let (ref acc_w, ref acc_i) = &mut right[0];
 
-            // Verify
-            let (ci_verify, _) =
-                NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::verify(
-                    &mut transcript_v,
-                    pp_hash,
-                    &instances[i].1,
-                    &instances[i + 1].1,
-                    &proof,
-                )
-                .unwrap();
+        let (wit_acc, inst_acc, proof) = NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+            &mut transcript_p,
+            pp_hash,
+            simple_w,
+            &simple_i,
+            &acc_w,
+            &acc_i,
+        )
+        .unwrap();
 
-            // Ensure they match
-            assert_eq!(instance_acc, ci_verify);
-            NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::check_relation(
-                &wit_acc,
-                &instance_acc,
-                &pedersen_params,
-            )
+        // Verify
+        let (ci_verify, _) = NIFS::<Projective, PoseidonSponge<Fr>>::verify(
+            &mut transcript_v,
+            pp_hash,
+            &simple_i,
+            &acc_i,
+            &proof,
+        )
+        .unwrap();
+
+        // Ensure they match
+        assert_eq!(inst_acc, ci_verify);
+
+        NIFS::<Projective, PoseidonSponge<Fr>>::check_relation(&wit_acc, &inst_acc, &hyrax_params)
             .expect("Relationship check failed");
-        }
     }
 
     #[test]
@@ -557,20 +561,15 @@ pub mod tests {
         let mat_dim = 16; // 16x16 matrices
 
         // Set up transcript and commitment scheme
-        let (pedersen_params, _) =
-            Pedersen::<Projective>::setup(&mut rng, mat_dim * mat_dim).unwrap();
+        let hyrax_params =
+            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
         let pp_hash = Fr::rand(&mut rng);
 
         let mut instances: Vec<(Witness<Projective>, RelaxedCommittedRelation<Projective>)> =
-            get_instances::<Projective, Pedersen<Projective>>(
-                n_instances,
-                mat_dim,
-                &mut rng,
-                &pedersen_params,
-            );
+            get_instances::<Projective>(n_instances, mat_dim, &mut rng, &hyrax_params);
 
         // Keep track of the accumulated state
         let first_instance = instances.remove(0);
@@ -578,38 +577,36 @@ pub mod tests {
         let mut current_acc_inst = first_instance.1;
 
         // Fold through all remaining instances
-        for (next_w, next_i) in instances {
+        for (mut next_w, next_i) in instances {
             // Fold
-            let (wit_acc, inst_acc, proof) =
-                NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::prove(
-                    &mut transcript_p,
-                    pp_hash,
-                    &next_w,
-                    &next_i,
-                    &current_acc_wit,
-                    &current_acc_inst,
-                )
-                .unwrap();
+            let (wit_acc, inst_acc, proof) = NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+                &mut transcript_p,
+                pp_hash,
+                &mut next_w,
+                &next_i,
+                &current_acc_wit,
+                &current_acc_inst,
+            )
+            .unwrap();
 
             // Verify
-            let (ci_verify, _) =
-                NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::verify(
-                    &mut transcript_v,
-                    pp_hash,
-                    &next_i,
-                    &current_acc_inst,
-                    &proof,
-                )
-                .unwrap();
+            let (ci_verify, _) = NIFS::<Projective, PoseidonSponge<Fr>>::verify(
+                &mut transcript_v,
+                pp_hash,
+                &next_i,
+                &current_acc_inst,
+                &proof,
+            )
+            .unwrap();
 
             // Ensure they match
             assert_eq!(inst_acc, ci_verify);
 
             // Update state for next iteration
-            NIFS::<Projective, Pedersen<Projective>, PoseidonSponge<Fr>>::check_relation(
+            NIFS::<Projective, PoseidonSponge<Fr>>::check_relation(
                 &wit_acc,
                 &inst_acc,
-                &pedersen_params,
+                &hyrax_params,
             )
             .expect("Relationship check failed");
 

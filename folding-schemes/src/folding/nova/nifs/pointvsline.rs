@@ -416,8 +416,11 @@ mod tests {
     use ark_std::{log2, UniformRand};
 
     use crate::folding::nova::nifs::mova::Witness;
-    use crate::folding::nova::nifs::mova_matrix::Witness as MatrixWitness;
+    use crate::folding::nova::nifs::mova_matrix::{
+        RelaxedCommittedRelation, Witness as MatrixWitness,
+    };
 
+    use crate::commitment::hyrax::{Hyrax, HyraxGenerators};
     use crate::utils::mle::MultilinearExtension;
     use ark_crypto_primitives::sponge::CryptographicSponge;
     use ark_ff::{One, Zero};
@@ -606,7 +609,7 @@ mod tests {
         // This test mainly focuses on if the evaluation of h1 are correct.
         let mut rng = ark_std::test_rng();
 
-        let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, 4);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
@@ -621,8 +624,25 @@ mod tests {
             C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
             E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
         };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let U_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, rE)?;
+        let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+        // below is the commit code modified to work with dense matrices.
+        let U_i = {
+            let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
+            let mleE = mle.evaluate(&rE);
+            // Right now we are ignoring the hiding property and directly commit to the matrices
+            let com_a = Hyrax::commit(W_i.A.as_dense_slice().unwrap(), &hyrax_params)?;
+            let com_b = Hyrax::commit(W_i.B.as_dense_slice().unwrap(), &hyrax_params)?;
+            let com_c = Hyrax::commit(W_i.C.as_dense_slice().unwrap(), &hyrax_params)?;
+
+            RelaxedCommittedRelation {
+                cmA: com_a,
+                cmB: com_b,
+                cmC: com_c,
+                u: Fr::one(),
+                mleE,
+                rE,
+            }
+        };
 
         let w_i = MatrixWitness {
             A: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
@@ -630,8 +650,25 @@ mod tests {
             C: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
             E: Matrix::dense_from_vec(vec![three, four, five, six], 2, 2).unwrap(),
         };
-        let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let u_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, rE)?;
+        let rE: Vec<Fr> = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
+        // below is the commit code modified to work with dense matrices.
+        let u_i = {
+            let mle = MultilinearExtension::from_evaluations(&W_i.E, log2(W_i.E.len()) as usize);
+            let mleE = mle.evaluate(&rE);
+            // Right now we are ignoring the hiding property and directly commit to the matrices
+            let com_a = Hyrax::commit(W_i.A.as_dense_slice().unwrap(), &hyrax_params)?;
+            let com_b = Hyrax::commit(W_i.B.as_dense_slice().unwrap(), &hyrax_params)?;
+            let com_c = Hyrax::commit(W_i.C.as_dense_slice().unwrap(), &hyrax_params)?;
+
+            RelaxedCommittedRelation {
+                cmA: com_a,
+                cmB: com_b,
+                cmC: com_c,
+                u: Fr::one(),
+                mleE,
+                rE,
+            }
+        };
 
         let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
 
@@ -673,7 +710,7 @@ mod tests {
         // This test mainly focuses on if the evaluation of h1 are correct.
         let mut rng = ark_std::test_rng();
 
-        let (pedersen_params, _) = Pedersen::<Projective>::setup(&mut rng, 4)?;
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, 4);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
@@ -689,7 +726,7 @@ mod tests {
             E: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
         };
         let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let U_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&W_i, &pedersen_params, rE)?;
+        let U_i = MatrixWitness::commit(&W_i, &hyrax_params, rE)?;
 
         let w_i = MatrixWitness {
             A: Matrix::sparse_from_vec(vec![(0, three), (3, six)], 2, 2).unwrap(),
@@ -698,7 +735,7 @@ mod tests {
             E: Matrix::sparse_from_vec(vec![(1, four), (2, five)], 2, 2).unwrap(),
         };
         let rE = (0..log2(W_i.E.len())).map(|_| Fr::rand(&mut rng)).collect();
-        let u_i = MatrixWitness::commit::<Pedersen<Projective>, false>(&w_i, &pedersen_params, rE)?;
+        let u_i = MatrixWitness::commit(&w_i, &hyrax_params, rE)?;
 
         let (proof, claim) = PointVsLineMatrix::prove(&mut transcript_p, None, &u_i, &W_i, &w_i)?;
 
