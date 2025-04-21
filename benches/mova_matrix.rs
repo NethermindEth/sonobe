@@ -4,8 +4,6 @@ use ark_pallas::{Fr, Projective};
 use ark_std::{log2, UniformRand};
 use criterion::{criterion_group, criterion_main, Criterion};
 use folding_schemes::commitment::hyrax::HyraxGenerators;
-use folding_schemes::commitment::pedersen::Pedersen;
-use folding_schemes::commitment::{CommitmentScheme, NethermindCommitmentScheme};
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::Curve;
