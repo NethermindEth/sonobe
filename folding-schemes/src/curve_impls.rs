@@ -7,6 +7,7 @@ use ark_r1cs_std::{
     fields::fp::FpVar,
     groups::curves::short_weierstrass::ProjectiveVar,
 };
+use ark_std::Zero;
 
 #[cfg(feature = "pallas")]
 pub mod pallas {
@@ -39,7 +40,7 @@ pub mod vesta {
 #[cfg(feature = "bn254")]
 pub mod bn254 {
     use super::*;
-    use ark_bn254::{G1Projective, Parameters as BN254Parameters};
+    use ark_bn254::{G1Projective, Config as BN254Parameters};
     
     impl Curve for G1Projective {
         type Var = ProjectiveVar<BN254Parameters, FpVar<ark_bn254::Fq>>;
