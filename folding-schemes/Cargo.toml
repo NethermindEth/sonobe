@@ -15,7 +15,9 @@ ark-r1cs-std = { version = "^0.5.0", default-features = false, features = ["para
 ark-snark = { version = "^0.5.0", default-features = false }
 ark-serialize = { version = "^0.5.0", default-features = false }
 ark-groth16 = { version = "^0.5.0", default-features = false, features = ["parallel"]}
-ark-bn254 = { version = "^0.5.0", default-features = false }
+ark-bn254 = { version = "^0.5.0", default-features = false}
+ark-pallas = { version = "^0.5.0", default-features = false}
+ark-vesta = { version = "^0.5.0", default-features = false}
 ark-grumpkin = { version = "^0.5.0", default-features = false }
 thiserror = "1.0"
 rayon = "1"
@@ -53,7 +55,9 @@ getrandom = { version = "0.2", features = ["js"] }
 default = ["parallel"]
 parallel = []
 light-test = []
-
+pallas = ["ark-pallas/r1cs"]
+vesta = ["ark-vesta/r1cs"]
+bn254 = ["ark-bn254/r1cs"]
 
 [[bench]]
 name = "nova"
