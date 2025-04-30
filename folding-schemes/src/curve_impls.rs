@@ -2,6 +2,7 @@
 // to make them easier to use with the Curve trait.
 
 use ark_ec::short_weierstrass::Projective;
+use ark_std::Zero;
 
 #[cfg(feature = "pallas")]
 pub mod pallas {
