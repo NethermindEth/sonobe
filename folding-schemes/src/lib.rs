@@ -335,14 +335,3 @@ pub trait Curve:
 impl<P: SWCurveConfig<ScalarField: Field, BaseField: Field>> Curve for Projective<P> {
     type Var = ProjectiveVar<P, FpVar<P::BaseField>>;
 }
-
-// Module with specific curve implementations for external use
-pub mod curve_impls;
-
-// Re-export curve implementations for easier use
-#[cfg(feature = "pallas")]
-pub use curve_impls::pallas::*;
-#[cfg(feature = "vesta")]
-pub use curve_impls::vesta::*;
-#[cfg(feature = "bn254")]
-pub use curve_impls::bn254::*;

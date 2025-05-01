@@ -1,9 +1,9 @@
 use ark_crypto_primitives::sponge::{constraints::CryptographicSpongeVar, CryptographicSponge};
-use ark_ec::CurveGroup;
+use ark_ec::{AffineRepr, CurveGroup};
+use ark_ec::short_weierstrass::SWCurveConfig;
 use ark_ff::PrimeField;
 use ark_r1cs_std::{boolean::Boolean, fields::fp::FpVar, groups::CurveVar};
 use ark_relations::r1cs::SynthesisError;
-
 pub mod poseidon;
 
 /// An interface for objects that can be absorbed by a `Transcript`.
@@ -23,10 +23,16 @@ pub trait AbsorbNonNative {
     }
 }
 
-/// An interface for objects that can be absorbed by a `TranscriptVar` whose constraint field
-/// is `F`.
-///
-/// Matches `AbsorbGadget` in `ark-crypto-primitives`.
+pub trait AbsorbNonNativeWrapper {
+    fn to_native_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>);
+}
+
+impl <T: AbsorbNonNativeWrapper> AbsorbNonNative for T {
+    fn to_native_sponge_field_elements<F: PrimeField>(&self, dest: &mut Vec<F>) {
+        T::to_native_sponge_field_elements(self, dest)
+    }
+}
+
 pub trait AbsorbNonNativeGadget<F: PrimeField> {
     /// Converts the object into field elements that can be absorbed by a `TranscriptVar`.
     fn to_native_sponge_field_elements(&self) -> Result<Vec<FpVar<F>>, SynthesisError>;
