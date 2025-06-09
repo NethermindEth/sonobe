@@ -1,6 +1,6 @@
 use ark_ec::VariableBaseMSM;
 use ark_pallas::{Fr, Projective};
-use ark_std::{log2, UniformRand, Zero};
+use ark_std::{UniformRand, Zero};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use folding_schemes::commitment::hyrax::{Hyrax, HyraxGenerators};
 use folding_schemes::commitment::pedersen::Pedersen;
@@ -50,7 +50,7 @@ fn bench_dense_commits(c: &mut Criterion) {
 
         // Setup parameters
         let pedersen_params = Pedersen::<Projective>::setup_prover(&mut rng, n * n).unwrap();
-        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(n * n) as usize);
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, n * n);
 
         group.bench_with_input(BenchmarkId::new("Pedersen", n), &n, |b, _| {
             b.iter(|| Pedersen::<Projective>::commit(&pedersen_params, data, &Fr::zero()).unwrap());
@@ -78,7 +78,7 @@ fn bench_sparse_commits(c: &mut Criterion) {
 
         // Setup parameters
         let pedersen_params = Pedersen::<Projective>::setup_prover(&mut rng, n * n).unwrap();
-        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, log2(n * n) as usize);
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, n * n);
 
         group.bench_with_input(BenchmarkId::new("Pedersen Sparse", n), &n, |b, _| {
             b.iter(|| {
@@ -89,7 +89,8 @@ fn bench_sparse_commits(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("Hyrax Sparse", n), &n, |b, _| {
             b.iter(|| {
-                Hyrax::<Projective>::commit_sparse_matrix(sparse_data, &hyrax_params).unwrap()
+                Hyrax::<Projective>::commit_sparse_matrix(sparse_data, &hyrax_params, n * n)
+                    .unwrap()
             });
         });
     }

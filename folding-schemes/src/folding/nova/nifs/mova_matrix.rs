@@ -13,7 +13,7 @@ use crate::{Curve, Error};
 use ark_crypto_primitives::sponge::Absorb;
 use ark_ff::PrimeField;
 use ark_std::{log2, marker::PhantomData, rand::RngCore, One, UniformRand, Zero};
-use matrex::Matrix;
+use matrex::{Matrix, MatrixSize};
 use num_integer::Roots;
 
 /// Represents a relaxed committed relation for matrix multiplication folded instances.
@@ -107,12 +107,24 @@ impl<C: Curve> Witness<C> {
         // let com_c = Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?;
 
         // Sparse commit
-        let com_a = Hyrax::commit_sparse_matrix(self.A.as_sparse_slice().unwrap(), params)?;
-        let com_b = Hyrax::commit_sparse_matrix(self.B.as_sparse_slice().unwrap(), params)?;
+        let com_a = Hyrax::commit_sparse_matrix(
+            self.A.as_sparse_slice().unwrap(),
+            params,
+            self.A.rows() * self.A.cols(),
+        )?;
+        let com_b = Hyrax::commit_sparse_matrix(
+            self.B.as_sparse_slice().unwrap(),
+            params,
+            self.B.rows() * self.B.cols(),
+        )?;
         let com_c = if self.C.is_dense() {
             Hyrax::commit(self.C.as_dense_slice().unwrap(), params)?
         } else {
-            Hyrax::commit_sparse_matrix(self.C.as_sparse_slice().unwrap(), params)?
+            Hyrax::commit_sparse_matrix(
+                self.C.as_sparse_slice().unwrap(),
+                params,
+                self.C.rows() * self.C.cols(),
+            )?
         };
 
         // Batch dense commit
