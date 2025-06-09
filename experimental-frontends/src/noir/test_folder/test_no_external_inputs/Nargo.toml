@@ -1,8 +1,0 @@
-[package]
-name = "test_no_external_inputs"
-type = "bin"
-authors = [""]
-compiler_version = ">=0.30.0"
-
-[dependencies]
-
