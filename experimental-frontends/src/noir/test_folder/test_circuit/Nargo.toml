@@ -1,8 +1,0 @@
-[package]
-name = "test_circuit"
-type = "bin"
-authors = [""]
-compiler_version = ">=0.30.0"
-
-[dependencies]
-

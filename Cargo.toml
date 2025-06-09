@@ -1,8 +1,4 @@
 [workspace]
 members = [
-    "folding-schemes",
-    "solidity-verifiers",
-    "cli",
-    "experimental-frontends"
-,]
+    "folding-schemes",]
 resolver = "2"
