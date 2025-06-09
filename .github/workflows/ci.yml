@@ -50,8 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: 0.36.0
       - name: Use ssh-agent
         uses: webfactory/ssh-agent@v0.5.4
         with:
@@ -127,21 +125,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        feature_set: [basic, wasm]
+        feature_set: [basic]
         include:
           - feature_set: basic
             features: --features default
-            # We only want to test `experimental-frontends` package with `wasm` feature.
-          - feature_set: wasm
-            features: -p experimental-frontends --features wasm,parallel --target wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Add target
-        run: rustup target add wasm32-unknown-unknown
       - name: Use ssh-agent
         uses: webfactory/ssh-agent@v0.5.4
         with:
