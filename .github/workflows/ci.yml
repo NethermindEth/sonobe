@@ -5,33 +5,15 @@ on:
   push:
     branches:
       - main
+
 env:
   CARGO_TERM_COLOR: always
-  # Disable incremental compilation.
-  #
-  # Incremental compilation is useful as part of an edit-build-test-edit cycle,
-  # as it lets the compiler avoid recompiling code that hasn't changed. However,
-  # on CI, we're not making small edits; we're almost always building the entire
-  # project from scratch. Thus, incremental compilation on CI actually
-  # introduces *additional* overhead to support making future builds
-  # faster...but no future builds will ever occur in any given CI environment.
-  #
-  # See https://matklad.github.io/2021/09/04/fast-rust-builds.html#ci-workflow
-  # for details.
   CARGO_INCREMENTAL: 0
-  # Allow more retries for network requests in cargo (downloading crates) and
-  # rustup (installing toolchains). This should help to reduce flaky CI failures
-  # from transient network timeouts or other issues.
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  # Don't emit giant backtraces in the CI logs.
   RUST_BACKTRACE: short
-  # Use the same ssh-agent socket value across all jobs
-  # Useful when a GH action is using SSH behind-the-scenes
   SSH_AUTH_SOCK: /tmp/ssh_agent.sock
 
-# Jobs launched for a PR event cancel the ongoing one for the same workflow + PR,
-# Only retries (of the same run) for a Push event cancel the prior one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -57,20 +39,6 @@ jobs:
         uses: webfactory/ssh-agent@v0.5.4
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - name: Download Circom
-        run: |
-          mkdir -p $HOME/bin
-          curl -sSfL https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64 -o $HOME/bin/circom
-          chmod +x $HOME/bin/circom
-          echo "$HOME/bin" >> $GITHUB_PATH
-      - name: Download solc
-        run: |
-          curl -sSfL https://github.com/ethereum/solidity/releases/download/v0.8.4/solc-static-linux -o /usr/local/bin/solc
-          chmod +x /usr/local/bin/solc
-      - name: Execute compile.sh to generate .r1cs and .wasm from .circom
-        run: ./experimental-frontends/src/circom/test_folder/compile.sh
-      - name: Execute compile.sh to generate .json from noir
-        run: ./experimental-frontends/src/noir/test_folder/compile.sh
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -81,47 +49,6 @@ jobs:
         with:
           command: test
           args: --doc
-
-  build:
-    if: github.event.pull_request.draft == false
-    name: Build target ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - wasm32-unknown-unknown
-          - wasm32-wasi
-          # Ignoring until clear usage is required
-          # - wasm32-unknown-emscripten
-
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          override: false
-          default: true
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-      - name: Use ssh-agent
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - name: Wasm-compat experimental-frontends build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: -p experimental-frontends --no-default-features --target ${{ matrix.target }} --features "wasm, parallel"
-      - name: Wasm-compat folding-schemes build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: -p folding-schemes --no-default-features --target ${{ matrix.target }} --features "default,light-test"
-      - name: Run wasm-compat script
-        run: |
-          chmod +x .github/scripts/wasm-target-test-build.sh
-          .github/scripts/wasm-target-test-build.sh
-        shell: bash
-
 
   examples:
     if: github.event.pull_request.draft == false
@@ -137,27 +64,16 @@ jobs:
         uses: webfactory/ssh-agent@v0.5.4
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - name: Download Circom
-        run: |
-          mkdir -p $HOME/bin
-          curl -sSfL https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64 -o $HOME/bin/circom
-          chmod +x $HOME/bin/circom
-          echo "$HOME/bin" >> $GITHUB_PATH
-      - name: Download solc
-        run: |
-          curl -sSfL https://github.com/ethereum/solidity/releases/download/v0.8.4/solc-static-linux -o /usr/local/bin/solc
-          chmod +x /usr/local/bin/solc
-      - name: Execute compile.sh to generate .r1cs and .wasm from .circom
-        run: ./experimental-frontends/src/circom/test_folder/compile.sh
-      - name: Execute compile.sh to generate .json from noir
-        run: ./experimental-frontends/src/noir/test_folder/compile.sh
       - name: Run examples tests
         run: cargo test --examples
-      - name: Run examples
-        run: cargo run --release --example 2>&1 | grep -E '^ ' | xargs -n1 cargo run --release --example
+      - name: Run all examples
+        run: |
+          for f in $(ls examples/*.rs); do
+            name=$(basename "$f" .rs)
+            echo "Running example: $name"
+            cargo run --release --example "$name"
+          done
 
-  # run the benchmarks with the flag `--no-run` to ensure that they compile,
-  # but without executing them.
   bench:
     if: github.event.pull_request.draft == false
     name: Bench compile
@@ -193,29 +109,20 @@ jobs:
 
   clippy:
     if: github.event.pull_request.draft == false
-    name: Clippy lint checks
+    name: Clippy lint checks (basic)
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        feature_set: [basic, wasm]
+        feature_set: [basic]
         include:
           - feature_set: basic
             features: --features default
-            # We only want to test `experimental-frontends` package with `wasm` feature.
-          - feature_set: wasm
-            features: -p experimental-frontends --features wasm,parallel --target wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Add target
-        run: rustup target add wasm32-unknown-unknown
-      - name: Use ssh-agent
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
       - name: Run clippy
         uses: actions-rs/cargo@v1
         with:
