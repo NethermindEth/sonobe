@@ -67,7 +67,7 @@ fn bench_mova_matrix(c: &mut Criterion) {
                 // Set up transcript and commitment scheme
                 let hyrax_params = HyraxGenerators::<Projective>::setup(
                     &mut rng,
-                    log2(mat_dim * mat_dim) as usize,
+                    mat_dim * mat_dim,
                 );
                 let poseidon_config = poseidon_canonical_config::<Fr>();
                 let pp_hash = Fr::rand(&mut rng);
