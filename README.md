@@ -1,4 +1,9 @@
-# sonobe
+# Nethermind - Sonobe
+
+# NOTICE!!! 
+This branch contains only the folding functionality. The rest has been stripped off and can be found in **main**. 
+
+# Sonobe
 
 Experimental folding schemes library implemented jointly by [0xPARC](https://0xparc.org/) and [PSE](https://pse.dev).
 

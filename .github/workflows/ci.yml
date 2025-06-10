@@ -50,27 +50,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
-      - uses: noir-lang/noirup@v0.1.3
-        with:
-          toolchain: 0.36.0
       - name: Use ssh-agent
         uses: webfactory/ssh-agent@v0.5.4
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - name: Download Circom
-        run: |
-          mkdir -p $HOME/bin
-          curl -sSfL https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64 -o $HOME/bin/circom
-          chmod +x $HOME/bin/circom
-          echo "$HOME/bin" >> $GITHUB_PATH
-      - name: Download solc
-        run: |
-          curl -sSfL https://github.com/ethereum/solidity/releases/download/v0.8.4/solc-static-linux -o /usr/local/bin/solc
-          chmod +x /usr/local/bin/solc
-      - name: Execute compile.sh to generate .r1cs and .wasm from .circom
-        run: ./experimental-frontends/src/circom/test_folder/compile.sh
-      - name: Execute compile.sh to generate .json from noir
-        run: ./experimental-frontends/src/noir/test_folder/compile.sh
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -81,47 +64,6 @@ jobs:
         with:
           command: test
           args: --doc
-
-  build:
-    if: github.event.pull_request.draft == false
-    name: Build target ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - wasm32-unknown-unknown
-          - wasm32-wasi
-          # Ignoring until clear usage is required
-          # - wasm32-unknown-emscripten
-
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
-        with:
-          override: false
-          default: true
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-      - name: Use ssh-agent
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - name: Wasm-compat experimental-frontends build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: -p experimental-frontends --no-default-features --target ${{ matrix.target }} --features "wasm, parallel"
-      - name: Wasm-compat folding-schemes build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: -p folding-schemes --no-default-features --target ${{ matrix.target }} --features "default,light-test"
-      - name: Run wasm-compat script
-        run: |
-          chmod +x .github/scripts/wasm-target-test-build.sh
-          .github/scripts/wasm-target-test-build.sh
-        shell: bash
-
 
   examples:
     if: github.event.pull_request.draft == false
@@ -137,20 +79,6 @@ jobs:
         uses: webfactory/ssh-agent@v0.5.4
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      - name: Download Circom
-        run: |
-          mkdir -p $HOME/bin
-          curl -sSfL https://github.com/iden3/circom/releases/download/v2.1.6/circom-linux-amd64 -o $HOME/bin/circom
-          chmod +x $HOME/bin/circom
-          echo "$HOME/bin" >> $GITHUB_PATH
-      - name: Download solc
-        run: |
-          curl -sSfL https://github.com/ethereum/solidity/releases/download/v0.8.4/solc-static-linux -o /usr/local/bin/solc
-          chmod +x /usr/local/bin/solc
-      - name: Execute compile.sh to generate .r1cs and .wasm from .circom
-        run: ./experimental-frontends/src/circom/test_folder/compile.sh
-      - name: Execute compile.sh to generate .json from noir
-        run: ./experimental-frontends/src/noir/test_folder/compile.sh
       - name: Run examples tests
         run: cargo test --examples
       - name: Run examples
@@ -197,21 +125,16 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        feature_set: [basic, wasm]
+        feature_set: [basic]
         include:
           - feature_set: basic
             features: --features default
-            # We only want to test `experimental-frontends` package with `wasm` feature.
-          - feature_set: wasm
-            features: -p experimental-frontends --features wasm,parallel --target wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Add target
-        run: rustup target add wasm32-unknown-unknown
       - name: Use ssh-agent
         uses: webfactory/ssh-agent@v0.5.4
         with:
