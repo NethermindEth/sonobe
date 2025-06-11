@@ -89,8 +89,7 @@ fn bench_sparse_commits(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("Hyrax Sparse", n), &n, |b, _| {
             b.iter(|| {
-                Hyrax::<Projective>::commit_sparse_matrix(sparse_data, &hyrax_params, n * n)
-                    .unwrap()
+                Hyrax::<Projective>::commit_sparse_matrix(sparse_data, &hyrax_params).unwrap()
             });
         });
     }

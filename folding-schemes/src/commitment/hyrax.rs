@@ -102,8 +102,9 @@ impl<C: Curve> Hyrax<C> {
     pub fn commit_sparse_matrix(
         indices_values: &[(usize, C::ScalarField)],
         gens: &HyraxGenerators<C>,
-        max_elems: usize,
     ) -> Result<Vec<C>, Error> {
+        let max_elems =
+            gens.pedersen_generators.generators.len() * gens.pedersen_generators.generators.len();
         let (L_size, R_size) = matrix_dimensions(max_elems);
         // For each row i in [0..L_size], gather all (pos, val) where row_start <= pos < row_end
         // and do a "sparse" Pedersen commit using the row‐local indices (pos - row_start).
@@ -224,7 +225,7 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        let commitment2 = Hyrax::<Projective>::commit_sparse_matrix(&sparse_repr, &gens, max_elems);
+        let commitment2 = Hyrax::<Projective>::commit_sparse_matrix(&sparse_repr, &gens);
         assert!(commitment2.is_ok());
         let hyrax2 = commitment2.unwrap();
 
