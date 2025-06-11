@@ -273,7 +273,7 @@ fn compute_h<F: PrimeField>(
             return Err(Error::NotEqual);
         }
 
-        // Start with coefficient vectors
+        // Start with coefficient vectors. For now they are constant polynomials with a single coefficient
         let mut coeffs: Vec<Vec<F>> = mle
             .evaluations
             .iter()
@@ -281,6 +281,7 @@ fn compute_h<F: PrimeField>(
             .collect();
 
         for (i, (&r1_i, &r2_sub_r1_i)) in r1.iter().zip(r2_sub_r1.iter()).enumerate().take(n_vars) {
+            // Create a linear polynomial r(X) = r1_i + (r2_sub_r1_i) * X (basically l)
             let half_len = 1 << (n_vars - i - 1);
             let new_coeffs: Vec<Vec<F>> = (0..half_len)
                 .into_par_iter()
@@ -291,23 +292,19 @@ fn compute_h<F: PrimeField>(
                     let left_coeffs = &coeffs[left_idx];
                     let right_coeffs = &coeffs[right_idx];
 
-                    // Compute (right - left) coefficients
-                    let mut diff_coeffs = vec![F::zero(); right_coeffs.len()];
-                    for j in 0..right_coeffs.len() {
-                        diff_coeffs[j] = right_coeffs[j] - left_coeffs[j];
+                    // Initialize result coefficients
+                    let mut result_coeffs = vec![F::zero(); right_coeffs.len() + 1];
+
+                    // Add left polynomial contribution
+                    for (j, &left_val) in left_coeffs.iter().enumerate() {
+                        result_coeffs[j] = left_val;
                     }
 
-                    // Multiply by linear polynomial
-                    let mut result_coeffs = vec![F::zero(); diff_coeffs.len() + 1];
-
-                    for j in 0..diff_coeffs.len() {
-                        result_coeffs[j] += diff_coeffs[j] * r1_i;
-                        result_coeffs[j + 1] += diff_coeffs[j] * r2_sub_r1_i;
-                    }
-
-                    // Add left polynomial
-                    for j in 0..left_coeffs.len() {
-                        result_coeffs[j] += left_coeffs[j];
+                    // Add (right - left) * (r1_i + r2_sub_r1_i * X) contribution directly
+                    for (j, (&right_val, &left_val)) in right_coeffs.iter().zip(left_coeffs.iter()).enumerate() {
+                        let diff = right_val - left_val;
+                        result_coeffs[j] += diff * r1_i;
+                        result_coeffs[j + 1] += diff * r2_sub_r1_i;
                     }
 
                     result_coeffs
@@ -322,7 +319,7 @@ fn compute_h<F: PrimeField>(
 
 /// Implementation for computing h by not following Algorithm 1 "MLE-after-line composition" off the Mova paper
 /// This is due to the need to support sparse representation.
-/// Currently this is only used for the mova_matrix.rs implementation that is configured to use Matrex
+/// Currently, this is only used for the mova_matrix.rs implementation configured to use Matrex
 fn compute_h2<F: PrimeField>(
     mle: &MultilinearExtension<F>,
     r1: &[F],
@@ -356,23 +353,19 @@ fn compute_h2<F: PrimeField>(
                         let left_coeffs: &Vec<F> = &coeffs[left_idx];
                         let right_coeffs: &Vec<F> = &coeffs[right_idx];
 
-                        // Compute (right - left) coefficients
-                        let mut diff_coeffs = vec![F::zero(); right_coeffs.len()];
-                        for j in 0..right_coeffs.len() {
-                            diff_coeffs[j] = right_coeffs[j] - left_coeffs[j];
+                        let max_degree = right_coeffs.len() + 1;
+                        let mut result_coeffs = vec![F::zero(); max_degree];
+
+                        // Add left polynomial first
+                        for (j, &left_val) in left_coeffs.iter().enumerate() {
+                            result_coeffs[j] = left_val;
                         }
 
-                        // Multiply by linear polynomial (r1_i + r2_sub_r1_i * x)
-                        let mut result_coeffs = vec![F::zero(); diff_coeffs.len() + 1];
-
-                        for j in 0..diff_coeffs.len() {
-                            result_coeffs[j] += diff_coeffs[j] * r1_i;
-                            result_coeffs[j + 1] += diff_coeffs[j] * r2_sub_r1_i;
-                        }
-
-                        // Add left polynomial
-                        for j in 0..left_coeffs.len() {
-                            result_coeffs[j] += left_coeffs[j];
+                        // Add right polynomial contribution directly: (right - left) * (r1_i + r2_sub_r1_i * x)
+                        for (j, (&right_val, &left_val)) in right_coeffs.iter().zip(left_coeffs.iter()).enumerate() {
+                            let diff = right_val - left_val;
+                            result_coeffs[j] += diff * r1_i;
+                            result_coeffs[j + 1] += diff * r2_sub_r1_i;
                         }
 
                         result_coeffs
@@ -389,15 +382,13 @@ fn compute_h2<F: PrimeField>(
         }
 
         MultilinearExtension::SparseMLE(mle_sparse) => {
-            // new algorithm
+            // If there are no evaluations, return the zero polynomial
             if mle_sparse.evaluations.is_empty() {
                 return Ok(SparseOrDensePolynomial::from_sparse(
                     SparsePolynomial::zero(),
                 ));
             }
-
             let max_degree = n_vars + 1;
-
             // Pre-compute linear factors to avoid repeated computation
             let linear_factors: Vec<(F, F, F, F)> = (0..n_vars)
                 .map(|i| (
@@ -408,19 +399,21 @@ fn compute_h2<F: PrimeField>(
                 ))
                 .collect();
 
-            // Parallel version - same pattern as dense case
-            let contributions: Vec<Vec<F>> = mle_sparse.evaluations
+            let result_coeffs = mle_sparse.evaluations
                 .par_iter()
                 .map(|(&index, &value)| {
                     let mut contrib_coeffs = vec![F::zero(); max_degree];
                     contrib_coeffs[0] = value;
                     let mut current_degree = 0;
 
+                    // Multiply by the linear factor for each variable
                     for i in 0..n_vars {
                         let bit_i = (index >> i) & 1 == 1;
                         let (const_term, linear_term) = if bit_i {
+                            // If bit_i == 1, use r1_i + r2_sub_r1_i * x
                             (linear_factors[i].0, linear_factors[i].1)
                         } else {
+                            // If bit_i == 0, use 1 - r1_i - r2_sub_r1_i * x
                             (linear_factors[i].2, linear_factors[i].3)
                         };
 
@@ -434,19 +427,22 @@ fn compute_h2<F: PrimeField>(
                         current_degree += 1;
                     }
 
-                    // Return just the needed coefficients
+                    // Return just the required coefficients
                     contrib_coeffs.truncate(current_degree + 1);
                     contrib_coeffs
                 })
-                .collect();
-
-            // Sequential reduction - sum all contributions
-            let mut result_coeffs = vec![F::zero(); max_degree];
-            for contrib in contributions {
-                for (i, &coeff) in contrib.iter().enumerate() {
-                    result_coeffs[i] += coeff;
-                }
-            }
+                .reduce(
+                    || vec![F::zero(); max_degree],
+                    |mut acc, contrib| {
+                        // Parallel reduction: combine two coefficient vectors
+                        for (i, &coeff) in contrib.iter().enumerate() {
+                            if i < acc.len() {
+                                acc[i] += coeff;
+                            }
+                        }
+                        acc
+                    }
+                );
 
             // Remove trailing zeros
             let mut result_coeffs = result_coeffs;
