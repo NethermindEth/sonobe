@@ -58,7 +58,7 @@ fn get_instances<C: Curve>(
 fn bench_mova_matrix(c: &mut Criterion) {
     let mut group = c.benchmark_group("mova_matrix_sequential_folding");
     let mut rng = ark_std::test_rng();
-    let mat_dim = 4; // 4x4 matrices
+    let mat_dim = 8; // 4x4 matrices
 
     for count in NUM_OF_PRECONDITION_FOLDS {
         group

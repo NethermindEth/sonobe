@@ -10,6 +10,7 @@ use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, Polynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{log2, Zero};
 use std::fmt::Debug;
+use rayon::iter::{ParallelIterator, IntoParallelIterator, IntoParallelRefIterator};
 
 /// Implements the Points vs Line as described in
 /// [Mova](https://eprint.iacr.org/2024/1220.pdf) and Section 4.5.2 from Thaler’s book
@@ -267,33 +268,56 @@ fn compute_h<F: PrimeField>(
     r1: &[F],
     r2_sub_r1: &[F],
 ) -> Result<DensePolynomial<F>, Error> {
-    let n_vars: usize = mle.num_vars;
-    if r1.len() != r2_sub_r1.len() || r1.len() != n_vars {
-        return Err(Error::NotEqual);
-    }
-
-    // Initialize the polynomial vector from the evaluations in the multilinear extension.
-    // Each evaluation is turned into a constant polynomial.
-    let mut poly: Vec<DensePolynomial<F>> = mle
-        .evaluations
-        .iter()
-        .map(|&x| DensePolynomial::from_coefficients_slice(&[x]))
-        .collect();
-
-    for (i, (&r1_i, &r2_sub_r1_i)) in r1.iter().zip(r2_sub_r1.iter()).enumerate().take(n_vars) {
-        // Create a linear polynomial r(X) = r1_i + (r2_sub_r1_i) * X (basically l)
-        let r = DensePolynomial::from_coefficients_slice(&[r1_i, r2_sub_r1_i]);
-        let half_len = 1 << (n_vars - i - 1);
-
-        for b in 0..half_len {
-            let left = &poly[b << 1];
-            let right = &poly[(b << 1) + 1];
-            poly[b] = left + &(&r * &(right - left));
+        let n_vars: usize = mle.num_vars;
+        if r1.len() != r2_sub_r1.len() || r1.len() != n_vars {
+            return Err(Error::NotEqual);
         }
-    }
 
-    // After the loop, we should be left with a single polynomial, so return it.
-    Ok(poly.swap_remove(0))
+        // Start with coefficient vectors
+        let mut coeffs: Vec<Vec<F>> = mle
+            .evaluations
+            .iter()
+            .map(|&x| vec![x])
+            .collect();
+
+        for (i, (&r1_i, &r2_sub_r1_i)) in r1.iter().zip(r2_sub_r1.iter()).enumerate().take(n_vars) {
+            let half_len = 1 << (n_vars - i - 1);
+            let new_coeffs: Vec<Vec<F>> = (0..half_len)
+                .into_par_iter()
+                .map(|b| {
+                    let left_idx = b << 1;
+                    let right_idx = left_idx + 1;
+
+                    let left_coeffs = &coeffs[left_idx];
+                    let right_coeffs = &coeffs[right_idx];
+
+                    // Compute (right - left) coefficients
+                    let mut diff_coeffs = vec![F::zero(); right_coeffs.len()];
+                    for j in 0..right_coeffs.len() {
+                        diff_coeffs[j] = right_coeffs[j] - left_coeffs[j];
+                    }
+
+                    // Multiply by linear polynomial
+                    let mut result_coeffs = vec![F::zero(); diff_coeffs.len() + 1];
+
+                    for j in 0..diff_coeffs.len() {
+                        result_coeffs[j] += diff_coeffs[j] * r1_i;
+                        result_coeffs[j + 1] += diff_coeffs[j] * r2_sub_r1_i;
+                    }
+
+                    // Add left polynomial
+                    for j in 0..left_coeffs.len() {
+                        result_coeffs[j] += left_coeffs[j];
+                    }
+
+                    result_coeffs
+                })
+                .collect();
+
+            coeffs = new_coeffs;
+        }
+
+        Ok(DensePolynomial::from_coefficients_vec(coeffs.swap_remove(0)))
 }
 
 /// Implementation for computing h by not following Algorithm 1 "MLE-after-line composition" off the Mova paper
@@ -312,78 +336,127 @@ fn compute_h2<F: PrimeField>(
 
     match mle {
         MultilinearExtension::DenseMLE(mle_dense) => {
-            // following the paper
-            // Initialize poly as one constant polynomial per evaluation.
-            let mut poly: Vec<DensePolynomial<F>> = mle_dense
-                .evaluations
+            // Start with evaluations as degree-0 constant polynomials,
+            // We'll represent polynomials as coefficient vectors instead of DensePolynomials as it's more efficient.
+            let mut coeffs: Vec<Vec<F>> = mle_dense.evaluations
                 .iter()
-                .map(|&eval| DensePolynomial::from_coefficients_slice(&[eval]))
+                .map(|&eval| vec![eval])
                 .collect();
 
-            // For each variable i, fold pairs of polynomials using
-            // p_left + r_i * (p_right - p_left).
+            // For each variable, fold pairs of polynomials
             for (i, (&r1_i, &r2_sub_r1_i)) in r1.iter().zip(r2_sub_r1.iter()).enumerate() {
                 let half_len = 1 << (n_vars - i - 1);
 
-                // The polynomial representing r(x) = r1_i + (r2_i - r1_i)*x
-                let r_poly = DensePolynomial::from_coefficients_slice(&[r1_i, r2_sub_r1_i]);
+                let new_coeffs: Vec<Vec<F>> = (0..half_len)
+                    .into_par_iter()
+                    .map(|b| {
+                        let left_idx = b << 1;
+                        let right_idx = left_idx + 1;
 
-                for b in 0..half_len {
-                    let left = &poly[b << 1];
-                    let right = &poly[(b << 1) + 1];
-                    poly[b] = left + &(&r_poly * &(right - left));
-                }
+                        let left_coeffs: &Vec<F> = &coeffs[left_idx];
+                        let right_coeffs: &Vec<F> = &coeffs[right_idx];
 
-                // Truncate to half the length, since we've folded pairs into single polynomials.
-                poly.truncate(half_len);
+                        // Compute (right - left) coefficients
+                        let mut diff_coeffs = vec![F::zero(); right_coeffs.len()];
+                        for j in 0..right_coeffs.len() {
+                            diff_coeffs[j] = right_coeffs[j] - left_coeffs[j];
+                        }
+
+                        // Multiply by linear polynomial (r1_i + r2_sub_r1_i * x)
+                        let mut result_coeffs = vec![F::zero(); diff_coeffs.len() + 1];
+
+                        for j in 0..diff_coeffs.len() {
+                            result_coeffs[j] += diff_coeffs[j] * r1_i;
+                            result_coeffs[j + 1] += diff_coeffs[j] * r2_sub_r1_i;
+                        }
+
+                        // Add left polynomial
+                        for j in 0..left_coeffs.len() {
+                            result_coeffs[j] += left_coeffs[j];
+                        }
+
+                        result_coeffs
+                    })
+                    .collect();
+
+                coeffs = new_coeffs;
             }
 
-            // By now, poly.len() == 1
-            // Return that single polynomial as DenseOrSparsePolynomial
-            Ok(SparseOrDensePolynomial::from_dense(poly.remove(0)))
+            // Convert final coefficient vector to polynomial
+            Ok(SparseOrDensePolynomial::from_dense(
+                DensePolynomial::from_coefficients_vec(coeffs.into_iter().next().unwrap())
+            ))
         }
 
         MultilinearExtension::SparseMLE(mle_sparse) => {
             // new algorithm
-            // If there are no evaluations, return the zero polynomial
             if mle_sparse.evaluations.is_empty() {
                 return Ok(SparseOrDensePolynomial::from_sparse(
                     SparsePolynomial::zero(),
                 ));
             }
 
-            // Initialize the result polynomial as zero
-            let mut sum_poly = DensePolynomial::zero();
+            let max_degree = n_vars + 1;
 
-            // Iterate over each non-zero evaluation
-            for (&index, &value) in &mle_sparse.evaluations {
-                // Convert index to binary vector (little-endian, least significant bit is i=0)
-                // This represents the variable assignments for the evaluation point, with b[i] indicating if variable i is 1 or 0.
-                let mut b = vec![false; n_vars];
-                for (i, bit) in b.iter_mut().enumerate().take(n_vars) {
-                    *bit = (index >> i) & 1 == 1;
+            // Pre-compute linear factors to avoid repeated computation
+            let linear_factors: Vec<(F, F, F, F)> = (0..n_vars)
+                .map(|i| (
+                    r1[i],                    // factor_1_const
+                    r2_sub_r1[i],             // factor_1_linear
+                    F::one() - r1[i],         // factor_0_const
+                    -r2_sub_r1[i],            // factor_0_linear
+                ))
+                .collect();
+
+            // Parallel version - same pattern as dense case
+            let contributions: Vec<Vec<F>> = mle_sparse.evaluations
+                .par_iter()
+                .map(|(&index, &value)| {
+                    let mut contrib_coeffs = vec![F::zero(); max_degree];
+                    contrib_coeffs[0] = value;
+                    let mut current_degree = 0;
+
+                    for i in 0..n_vars {
+                        let bit_i = (index >> i) & 1 == 1;
+                        let (const_term, linear_term) = if bit_i {
+                            (linear_factors[i].0, linear_factors[i].1)
+                        } else {
+                            (linear_factors[i].2, linear_factors[i].3)
+                        };
+
+                        // Multiply in-place by linear polynomial
+                        contrib_coeffs[current_degree + 1] = contrib_coeffs[current_degree] * linear_term;
+                        for j in (1..=current_degree).rev() {
+                            contrib_coeffs[j] = contrib_coeffs[j] * const_term + contrib_coeffs[j-1] * linear_term;
+                        }
+                        contrib_coeffs[0] *= const_term;
+
+                        current_degree += 1;
+                    }
+
+                    // Return just the needed coefficients
+                    contrib_coeffs.truncate(current_degree + 1);
+                    contrib_coeffs
+                })
+                .collect();
+
+            // Sequential reduction - sum all contributions
+            let mut result_coeffs = vec![F::zero(); max_degree];
+            for contrib in contributions {
+                for (i, &coeff) in contrib.iter().enumerate() {
+                    result_coeffs[i] += coeff;
                 }
-
-                // Start with the constant polynomial equal to the evaluation value
-                let mut contrib = DensePolynomial::from_coefficients_slice(&[value]);
-
-                // Multiply by the linear factor for each variable
-                for i in 0..n_vars {
-                    let factor = if b[i] {
-                        // If b[i] == 1, use r1_i + r2_sub_r1_i * x
-                        DensePolynomial::from_coefficients_slice(&[r1[i], r2_sub_r1[i]])
-                    } else {
-                        // If b[i] == 0, use 1 - r1_i - r2_sub_r1_i * x
-                        DensePolynomial::from_coefficients_slice(&[F::one() - r1[i], -r2_sub_r1[i]])
-                    };
-                    contrib = &contrib * &factor;
-                }
-
-                sum_poly += &contrib;
             }
 
-            // Return the final polynomial
-            Ok(SparseOrDensePolynomial::from_dense(sum_poly))
+            // Remove trailing zeros
+            let mut result_coeffs = result_coeffs;
+            while result_coeffs.len() > 1 && result_coeffs.last() == Some(&F::zero()) {
+                result_coeffs.pop();
+            }
+
+            Ok(SparseOrDensePolynomial::from_dense(
+                DensePolynomial::from_coefficients_vec(result_coeffs)
+            ))
         }
     }
 }
