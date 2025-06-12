@@ -51,8 +51,17 @@ fn get_instances<C: Curve>(
             let c: Matrix<C::ScalarField> = (&a * &b).unwrap();
             // Enforce sparse matrices
             let c = if c.is_dense() {
-                Matrix::Sparse(SparseMatrix::from_vec(dense_to_sparse_vec::<C>(c.as_dense_slice().unwrap()), c.rows(), c.cols()).unwrap())
-            } else { c };
+                Matrix::Sparse(
+                    SparseMatrix::from_vec(
+                        dense_to_sparse_vec::<C>(c.as_dense_slice().unwrap()),
+                        c.rows(),
+                        c.cols(),
+                    )
+                    .unwrap(),
+                )
+            } else {
+                c
+            };
             // Error matrix initialized to 0s
             let e = Matrix::zero(n, n);
 

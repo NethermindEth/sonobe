@@ -9,8 +9,8 @@ use ark_poly::univariate::{DensePolynomial, SparsePolynomial};
 use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, Polynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{log2, Zero};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::fmt::Debug;
-use rayon::iter::{ParallelIterator, IntoParallelIterator, IntoParallelRefIterator};
 
 /// Implements the Points vs Line as described in
 /// [Mova](https://eprint.iacr.org/2024/1220.pdf) and Section 4.5.2 from Thaler’s book
@@ -268,53 +268,53 @@ fn compute_h<F: PrimeField>(
     r1: &[F],
     r2_sub_r1: &[F],
 ) -> Result<DensePolynomial<F>, Error> {
-        let n_vars: usize = mle.num_vars;
-        if r1.len() != r2_sub_r1.len() || r1.len() != n_vars {
-            return Err(Error::NotEqual);
-        }
+    let n_vars: usize = mle.num_vars;
+    if r1.len() != r2_sub_r1.len() || r1.len() != n_vars {
+        return Err(Error::NotEqual);
+    }
 
-        // Start with coefficient vectors. For now they are constant polynomials with a single coefficient
-        let mut coeffs: Vec<Vec<F>> = mle
-            .evaluations
-            .iter()
-            .map(|&x| vec![x])
+    // Start with coefficient vectors. For now they are constant polynomials with a single coefficient
+    let mut coeffs: Vec<Vec<F>> = mle.evaluations.iter().map(|&x| vec![x]).collect();
+
+    for (i, (&r1_i, &r2_sub_r1_i)) in r1.iter().zip(r2_sub_r1.iter()).enumerate().take(n_vars) {
+        // Create a linear polynomial r(X) = r1_i + (r2_sub_r1_i) * X (basically l)
+        let half_len = 1 << (n_vars - i - 1);
+        let new_coeffs: Vec<Vec<F>> = (0..half_len)
+            .into_par_iter()
+            .map(|b| {
+                let left_idx = b << 1;
+                let right_idx = left_idx + 1;
+
+                let left_coeffs = &coeffs[left_idx];
+                let right_coeffs = &coeffs[right_idx];
+
+                // Initialize result coefficients
+                let mut result_coeffs = vec![F::zero(); right_coeffs.len() + 1];
+
+                // Add left polynomial contribution
+                for (j, &left_val) in left_coeffs.iter().enumerate() {
+                    result_coeffs[j] = left_val;
+                }
+
+                // Add (right - left) * (r1_i + r2_sub_r1_i * X) contribution directly
+                for (j, (&right_val, &left_val)) in
+                    right_coeffs.iter().zip(left_coeffs.iter()).enumerate()
+                {
+                    let diff = right_val - left_val;
+                    result_coeffs[j] += diff * r1_i;
+                    result_coeffs[j + 1] += diff * r2_sub_r1_i;
+                }
+
+                result_coeffs
+            })
             .collect();
 
-        for (i, (&r1_i, &r2_sub_r1_i)) in r1.iter().zip(r2_sub_r1.iter()).enumerate().take(n_vars) {
-            // Create a linear polynomial r(X) = r1_i + (r2_sub_r1_i) * X (basically l)
-            let half_len = 1 << (n_vars - i - 1);
-            let new_coeffs: Vec<Vec<F>> = (0..half_len)
-                .into_par_iter()
-                .map(|b| {
-                    let left_idx = b << 1;
-                    let right_idx = left_idx + 1;
+        coeffs = new_coeffs;
+    }
 
-                    let left_coeffs = &coeffs[left_idx];
-                    let right_coeffs = &coeffs[right_idx];
-
-                    // Initialize result coefficients
-                    let mut result_coeffs = vec![F::zero(); right_coeffs.len() + 1];
-
-                    // Add left polynomial contribution
-                    for (j, &left_val) in left_coeffs.iter().enumerate() {
-                        result_coeffs[j] = left_val;
-                    }
-
-                    // Add (right - left) * (r1_i + r2_sub_r1_i * X) contribution directly
-                    for (j, (&right_val, &left_val)) in right_coeffs.iter().zip(left_coeffs.iter()).enumerate() {
-                        let diff = right_val - left_val;
-                        result_coeffs[j] += diff * r1_i;
-                        result_coeffs[j + 1] += diff * r2_sub_r1_i;
-                    }
-
-                    result_coeffs
-                })
-                .collect();
-
-            coeffs = new_coeffs;
-        }
-
-        Ok(DensePolynomial::from_coefficients_vec(coeffs.swap_remove(0)))
+    Ok(DensePolynomial::from_coefficients_vec(
+        coeffs.swap_remove(0),
+    ))
 }
 
 /// Implementation for computing h by not following Algorithm 1 "MLE-after-line composition" off the Mova paper
@@ -335,7 +335,8 @@ fn compute_h2<F: PrimeField>(
         MultilinearExtension::DenseMLE(mle_dense) => {
             // Start with evaluations as degree-0 constant polynomials,
             // We'll represent polynomials as coefficient vectors instead of DensePolynomials as it's more efficient.
-            let mut coeffs: Vec<Vec<F>> = mle_dense.evaluations
+            let mut coeffs: Vec<Vec<F>> = mle_dense
+                .evaluations
                 .iter()
                 .map(|&eval| vec![eval])
                 .collect();
@@ -362,7 +363,9 @@ fn compute_h2<F: PrimeField>(
                         }
 
                         // Add right polynomial contribution directly: (right - left) * (r1_i + r2_sub_r1_i * x)
-                        for (j, (&right_val, &left_val)) in right_coeffs.iter().zip(left_coeffs.iter()).enumerate() {
+                        for (j, (&right_val, &left_val)) in
+                            right_coeffs.iter().zip(left_coeffs.iter()).enumerate()
+                        {
                             let diff = right_val - left_val;
                             result_coeffs[j] += diff * r1_i;
                             result_coeffs[j + 1] += diff * r2_sub_r1_i;
@@ -377,7 +380,7 @@ fn compute_h2<F: PrimeField>(
 
             // Convert final coefficient vector to polynomial
             Ok(SparseOrDensePolynomial::from_dense(
-                DensePolynomial::from_coefficients_vec(coeffs.into_iter().next().unwrap())
+                DensePolynomial::from_coefficients_vec(coeffs.into_iter().next().unwrap()),
             ))
         }
 
@@ -391,15 +394,18 @@ fn compute_h2<F: PrimeField>(
             let max_degree = n_vars + 1;
             // Pre-compute linear factors to avoid repeated computation
             let linear_factors: Vec<(F, F, F, F)> = (0..n_vars)
-                .map(|i| (
-                    r1[i],                    // factor_1_const
-                    r2_sub_r1[i],             // factor_1_linear
-                    F::one() - r1[i],         // factor_0_const
-                    -r2_sub_r1[i],            // factor_0_linear
-                ))
+                .map(|i| {
+                    (
+                        r1[i],            // factor_1_const
+                        r2_sub_r1[i],     // factor_1_linear
+                        F::one() - r1[i], // factor_0_const
+                        -r2_sub_r1[i],    // factor_0_linear
+                    )
+                })
                 .collect();
 
-            let result_coeffs = mle_sparse.evaluations
+            let result_coeffs = mle_sparse
+                .evaluations
                 .par_iter()
                 .map(|(&index, &value)| {
                     let mut contrib_coeffs = vec![F::zero(); max_degree];
@@ -418,9 +424,11 @@ fn compute_h2<F: PrimeField>(
                         };
 
                         // Multiply in-place by linear polynomial
-                        contrib_coeffs[current_degree + 1] = contrib_coeffs[current_degree] * linear_term;
+                        contrib_coeffs[current_degree + 1] =
+                            contrib_coeffs[current_degree] * linear_term;
                         for j in (1..=current_degree).rev() {
-                            contrib_coeffs[j] = contrib_coeffs[j] * const_term + contrib_coeffs[j-1] * linear_term;
+                            contrib_coeffs[j] = contrib_coeffs[j] * const_term
+                                + contrib_coeffs[j - 1] * linear_term;
                         }
                         contrib_coeffs[0] *= const_term;
 
@@ -441,7 +449,7 @@ fn compute_h2<F: PrimeField>(
                             }
                         }
                         acc
-                    }
+                    },
                 );
 
             // Remove trailing zeros
@@ -451,7 +459,7 @@ fn compute_h2<F: PrimeField>(
             }
 
             Ok(SparseOrDensePolynomial::from_dense(
-                DensePolynomial::from_coefficients_vec(result_coeffs)
+                DensePolynomial::from_coefficients_vec(result_coeffs),
             ))
         }
     }
@@ -481,7 +489,9 @@ mod tests {
     use crate::Error;
     use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
     use ark_pallas::{Fr, Projective};
-    use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, Polynomial, SparseMultilinearExtension};
+    use ark_poly::{
+        DenseMultilinearExtension, DenseUVPolynomial, Polynomial, SparseMultilinearExtension,
+    };
     use ark_std::{log2, UniformRand};
 
     use crate::folding::nova::nifs::mova::Witness;
@@ -843,7 +853,7 @@ mod tests {
     #[test]
     fn test_compute_h2_compare() {
         use ark_std::test_rng;
-        
+
         // Test Case 1: Simple case with sparse pattern
         {
             let vanilla_dense = DenseMultilinearExtension::from_evaluations_slice(
@@ -883,10 +893,11 @@ mod tests {
         {
             let mut rng = test_rng();
             let evaluations: Vec<Fr> = (0..16).map(|_| Fr::rand(&mut rng)).collect();
-            
-            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(4, evaluations.clone());
+
+            let vanilla_dense =
+                DenseMultilinearExtension::from_evaluations_vec(4, evaluations.clone());
             let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
-            
+
             // Create sparse version by filtering out small values
             let sparse_evals: Vec<(usize, Fr)> = evaluations
                 .iter()
@@ -895,7 +906,7 @@ mod tests {
                 .map(|(i, &val)| (i, val))
                 .collect();
             let mle_sparse = MultilinearExtension::SparseMLE(
-                SparseMultilinearExtension::from_evaluations(4, &sparse_evals)
+                SparseMultilinearExtension::from_evaluations(4, &sparse_evals),
             );
 
             let r0: Vec<Fr> = (0..4).map(|_| Fr::rand(&mut rng)).collect();
@@ -906,19 +917,26 @@ mod tests {
             let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
             let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
 
-            assert_eq!(result_h2_dense, result_h2_sparse, "Random 4-var case: dense vs sparse mismatch");
-            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Random 4-var case: h2_dense vs h mismatch");
+            assert_eq!(
+                result_h2_dense, result_h2_sparse,
+                "Random 4-var case: dense vs sparse mismatch"
+            );
+            assert_eq!(
+                result_h2_dense.coeffs(),
+                result_h.coeffs(),
+                "Random 4-var case: h2_dense vs h mismatch"
+            );
         }
 
         // Test Case 3: Edge case - all zeros except one
         {
             let mut evaluations = vec![Fr::zero(); 8];
             evaluations[5] = Fr::from(42);
-            
+
             let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(3, evaluations);
             let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
             let mle_sparse = MultilinearExtension::SparseMLE(
-                SparseMultilinearExtension::from_evaluations(3, &[(5, Fr::from(42))])
+                SparseMultilinearExtension::from_evaluations(3, &[(5, Fr::from(42))]),
             );
 
             let r0 = [Fr::from(7), Fr::from(11), Fr::from(13)];
@@ -929,19 +947,27 @@ mod tests {
             let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
             let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
 
-            assert_eq!(result_h2_dense, result_h2_sparse, "Single non-zero case: dense vs sparse mismatch");
-            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Single non-zero case: h2_dense vs h mismatch");
+            assert_eq!(
+                result_h2_dense, result_h2_sparse,
+                "Single non-zero case: dense vs sparse mismatch"
+            );
+            assert_eq!(
+                result_h2_dense.coeffs(),
+                result_h.coeffs(),
+                "Single non-zero case: h2_dense vs h mismatch"
+            );
         }
 
         // Test Case 4: Edge case - all ones (dense case)
         {
             let evaluations = vec![Fr::one(); 16];
-            
-            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(4, evaluations.clone());
+
+            let vanilla_dense =
+                DenseMultilinearExtension::from_evaluations_vec(4, evaluations.clone());
             let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
             let sparse_evals: Vec<(usize, Fr)> = (0..16).map(|i| (i, Fr::one())).collect();
             let mle_sparse = MultilinearExtension::SparseMLE(
-                SparseMultilinearExtension::from_evaluations(4, &sparse_evals)
+                SparseMultilinearExtension::from_evaluations(4, &sparse_evals),
             );
 
             let r0 = [Fr::from(2), Fr::from(3), Fr::from(5), Fr::from(7)];
@@ -952,19 +978,33 @@ mod tests {
             let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
             let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
 
-            assert_eq!(result_h2_dense, result_h2_sparse, "All ones case: dense vs sparse mismatch");
-            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "All ones case: h2_dense vs h mismatch");
+            assert_eq!(
+                result_h2_dense, result_h2_sparse,
+                "All ones case: dense vs sparse mismatch"
+            );
+            assert_eq!(
+                result_h2_dense.coeffs(),
+                result_h.coeffs(),
+                "All ones case: h2_dense vs h mismatch"
+            );
         }
 
         // Test Case 5: Alternating pattern
         {
             let evaluations: Vec<Fr> = (0..32)
-                .map(|i| if i % 2 == 0 { Fr::from(i as u64 + 1) } else { Fr::zero() })
+                .map(|i| {
+                    if i % 2 == 0 {
+                        Fr::from(i as u64 + 1)
+                    } else {
+                        Fr::zero()
+                    }
+                })
                 .collect();
-            
-            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(5, evaluations.clone());
+
+            let vanilla_dense =
+                DenseMultilinearExtension::from_evaluations_vec(5, evaluations.clone());
             let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
-            
+
             let sparse_evals: Vec<(usize, Fr)> = evaluations
                 .iter()
                 .enumerate()
@@ -972,19 +1012,38 @@ mod tests {
                 .map(|(i, &val)| (i, val))
                 .collect();
             let mle_sparse = MultilinearExtension::SparseMLE(
-                SparseMultilinearExtension::from_evaluations(5, &sparse_evals)
+                SparseMultilinearExtension::from_evaluations(5, &sparse_evals),
             );
 
-            let r0 = [Fr::from(1), Fr::from(4), Fr::from(9), Fr::from(16), Fr::from(25)];
-            let r1 = [Fr::from(36), Fr::from(49), Fr::from(64), Fr::from(81), Fr::from(100)];
+            let r0 = [
+                Fr::from(1),
+                Fr::from(4),
+                Fr::from(9),
+                Fr::from(16),
+                Fr::from(25),
+            ];
+            let r1 = [
+                Fr::from(36),
+                Fr::from(49),
+                Fr::from(64),
+                Fr::from(81),
+                Fr::from(100),
+            ];
             let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
 
             let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
             let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
             let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
 
-            assert_eq!(result_h2_dense, result_h2_sparse, "Alternating pattern case: dense vs sparse mismatch");
-            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Alternating pattern case: h2_dense vs h mismatch");
+            assert_eq!(
+                result_h2_dense, result_h2_sparse,
+                "Alternating pattern case: dense vs sparse mismatch"
+            );
+            assert_eq!(
+                result_h2_dense.coeffs(),
+                result_h.coeffs(),
+                "Alternating pattern case: h2_dense vs h mismatch"
+            );
         }
 
         // Test Case 6: Very sparse case (only corner evaluations)
@@ -992,12 +1051,14 @@ mod tests {
             let mut evaluations = vec![Fr::zero(); 16];
             evaluations[0] = Fr::from(10);
             evaluations[15] = Fr::from(20);
-            
+
             let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(4, evaluations);
             let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
-            let mle_sparse = MultilinearExtension::SparseMLE(
-                SparseMultilinearExtension::from_evaluations(4, &[(0, Fr::from(10)), (15, Fr::from(20))])
-            );
+            let mle_sparse =
+                MultilinearExtension::SparseMLE(SparseMultilinearExtension::from_evaluations(
+                    4,
+                    &[(0, Fr::from(10)), (15, Fr::from(20))],
+                ));
 
             let r0 = [Fr::zero(), Fr::zero(), Fr::zero(), Fr::zero()];
             let r1 = [Fr::one(), Fr::one(), Fr::one(), Fr::one()];
@@ -1007,12 +1068,27 @@ mod tests {
             let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
             let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
 
-            assert_eq!(result_h2_dense, result_h2_sparse, "Corner values case: dense vs sparse mismatch");
-            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Corner values case: h2_dense vs h mismatch");
-            
+            assert_eq!(
+                result_h2_dense, result_h2_sparse,
+                "Corner values case: dense vs sparse mismatch"
+            );
+            assert_eq!(
+                result_h2_dense.coeffs(),
+                result_h.coeffs(),
+                "Corner values case: h2_dense vs h mismatch"
+            );
+
             // Verify the interpolation property: h(0) should be MLE(r0) and h(1) should be MLE(r1)
-            assert_eq!(result_h.evaluate(&Fr::zero()), Fr::from(10), "h(0) should equal MLE(r0)");
-            assert_eq!(result_h.evaluate(&Fr::one()), Fr::from(20), "h(1) should equal MLE(r1)");
+            assert_eq!(
+                result_h.evaluate(&Fr::zero()),
+                Fr::from(10),
+                "h(0) should equal MLE(r0)"
+            );
+            assert_eq!(
+                result_h.evaluate(&Fr::one()),
+                Fr::from(20),
+                "h(1) should equal MLE(r1)"
+            );
         }
     }
 }
