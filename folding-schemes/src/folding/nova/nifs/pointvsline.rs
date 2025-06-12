@@ -481,7 +481,7 @@ mod tests {
     use crate::Error;
     use ark_crypto_primitives::sponge::poseidon::PoseidonSponge;
     use ark_pallas::{Fr, Projective};
-    use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, SparseMultilinearExtension};
+    use ark_poly::{DenseMultilinearExtension, DenseUVPolynomial, Polynomial, SparseMultilinearExtension};
     use ark_std::{log2, UniformRand};
 
     use crate::folding::nova::nifs::mova::Witness;
@@ -842,53 +842,177 @@ mod tests {
 
     #[test]
     fn test_compute_h2_compare() {
-        // Both MLEs represent the same information both in dense and sparse representation.
-        let vanilla_dense = DenseMultilinearExtension::from_evaluations_slice(
-            3,
-            &[
-                Fr::zero(),
-                Fr::zero(),
-                Fr::one(),
-                Fr::one(),
-                Fr::zero(),
-                Fr::zero(),
-                Fr::zero(),
-                Fr::one(),
-            ],
-        );
-        let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
-        let mle_sparse =
-            MultilinearExtension::SparseMLE(SparseMultilinearExtension::from_evaluations(
+        use ark_std::test_rng;
+        
+        // Test Case 1: Simple case with sparse pattern
+        {
+            let vanilla_dense = DenseMultilinearExtension::from_evaluations_slice(
                 3,
-                &[(2, Fr::one()), (3, Fr::one()), (7, Fr::one())],
-            ));
+                &[
+                    Fr::zero(),
+                    Fr::zero(),
+                    Fr::one(),
+                    Fr::one(),
+                    Fr::zero(),
+                    Fr::zero(),
+                    Fr::zero(),
+                    Fr::one(),
+                ],
+            );
+            let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+            let mle_sparse =
+                MultilinearExtension::SparseMLE(SparseMultilinearExtension::from_evaluations(
+                    3,
+                    &[(2, Fr::one()), (3, Fr::one()), (7, Fr::one())],
+                ));
 
-        let r0 = [Fr::from(1), Fr::from(2), Fr::from(3)];
-        let r1 = [Fr::from(5), Fr::from(6), Fr::from(7)];
-        let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+            let r0 = [Fr::from(1), Fr::from(2), Fr::from(3)];
+            let r1 = [Fr::from(5), Fr::from(6), Fr::from(7)];
+            let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
 
-        // Use original compute_h method
-        let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
 
-        // Use dense for compute_h2
-        let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            assert_eq!(result_h2_dense, result_h2_sparse);
+            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs());
+            assert_eq!(result_h2_sparse.coeffs(), result_h.coeffs());
+        }
 
-        // Use sparse for compute_h2
-        let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+        // Test Case 2: Larger size with random values (4 variables)
+        {
+            let mut rng = test_rng();
+            let evaluations: Vec<Fr> = (0..16).map(|_| Fr::rand(&mut rng)).collect();
+            
+            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(4, evaluations.clone());
+            let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+            
+            // Create sparse version by filtering out small values
+            let sparse_evals: Vec<(usize, Fr)> = evaluations
+                .iter()
+                .enumerate()
+                .filter(|(_, &val)| !val.is_zero())
+                .map(|(i, &val)| (i, val))
+                .collect();
+            let mle_sparse = MultilinearExtension::SparseMLE(
+                SparseMultilinearExtension::from_evaluations(4, &sparse_evals)
+            );
 
-        assert_eq!(
-            result_h2_dense, result_h2_sparse,
-            "Sparse and dense computations for compute h2 must be equal"
-        );
-        assert_eq!(
-            result_h2_dense.coeffs(),
-            result_h.coeffs(),
-            "Dense polynomial coefficients must match original h computation"
-        );
-        assert_eq!(
-            result_h2_sparse.coeffs(),
-            result_h.coeffs(),
-            "Sparse polynomial coefficients must match original h computation"
-        );
+            let r0: Vec<Fr> = (0..4).map(|_| Fr::rand(&mut rng)).collect();
+            let r1: Vec<Fr> = (0..4).map(|_| Fr::rand(&mut rng)).collect();
+            let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+            let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+
+            assert_eq!(result_h2_dense, result_h2_sparse, "Random 4-var case: dense vs sparse mismatch");
+            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Random 4-var case: h2_dense vs h mismatch");
+        }
+
+        // Test Case 3: Edge case - all zeros except one
+        {
+            let mut evaluations = vec![Fr::zero(); 8];
+            evaluations[5] = Fr::from(42);
+            
+            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(3, evaluations);
+            let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+            let mle_sparse = MultilinearExtension::SparseMLE(
+                SparseMultilinearExtension::from_evaluations(3, &[(5, Fr::from(42))])
+            );
+
+            let r0 = [Fr::from(7), Fr::from(11), Fr::from(13)];
+            let r1 = [Fr::from(17), Fr::from(19), Fr::from(23)];
+            let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+            let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+
+            assert_eq!(result_h2_dense, result_h2_sparse, "Single non-zero case: dense vs sparse mismatch");
+            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Single non-zero case: h2_dense vs h mismatch");
+        }
+
+        // Test Case 4: Edge case - all ones (dense case)
+        {
+            let evaluations = vec![Fr::one(); 16];
+            
+            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(4, evaluations.clone());
+            let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+            let sparse_evals: Vec<(usize, Fr)> = (0..16).map(|i| (i, Fr::one())).collect();
+            let mle_sparse = MultilinearExtension::SparseMLE(
+                SparseMultilinearExtension::from_evaluations(4, &sparse_evals)
+            );
+
+            let r0 = [Fr::from(2), Fr::from(3), Fr::from(5), Fr::from(7)];
+            let r1 = [Fr::from(11), Fr::from(13), Fr::from(17), Fr::from(19)];
+            let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+            let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+
+            assert_eq!(result_h2_dense, result_h2_sparse, "All ones case: dense vs sparse mismatch");
+            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "All ones case: h2_dense vs h mismatch");
+        }
+
+        // Test Case 5: Alternating pattern
+        {
+            let evaluations: Vec<Fr> = (0..32)
+                .map(|i| if i % 2 == 0 { Fr::from(i as u64 + 1) } else { Fr::zero() })
+                .collect();
+            
+            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(5, evaluations.clone());
+            let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+            
+            let sparse_evals: Vec<(usize, Fr)> = evaluations
+                .iter()
+                .enumerate()
+                .filter(|(_, &val)| !val.is_zero())
+                .map(|(i, &val)| (i, val))
+                .collect();
+            let mle_sparse = MultilinearExtension::SparseMLE(
+                SparseMultilinearExtension::from_evaluations(5, &sparse_evals)
+            );
+
+            let r0 = [Fr::from(1), Fr::from(4), Fr::from(9), Fr::from(16), Fr::from(25)];
+            let r1 = [Fr::from(36), Fr::from(49), Fr::from(64), Fr::from(81), Fr::from(100)];
+            let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+            let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+
+            assert_eq!(result_h2_dense, result_h2_sparse, "Alternating pattern case: dense vs sparse mismatch");
+            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Alternating pattern case: h2_dense vs h mismatch");
+        }
+
+        // Test Case 6: Very sparse case (only corner evaluations)
+        {
+            let mut evaluations = vec![Fr::zero(); 16];
+            evaluations[0] = Fr::from(10);
+            evaluations[15] = Fr::from(20);
+            
+            let vanilla_dense = DenseMultilinearExtension::from_evaluations_vec(4, evaluations);
+            let mle_dense = MultilinearExtension::DenseMLE(vanilla_dense.clone());
+            let mle_sparse = MultilinearExtension::SparseMLE(
+                SparseMultilinearExtension::from_evaluations(4, &[(0, Fr::from(10)), (15, Fr::from(20))])
+            );
+
+            let r0 = [Fr::zero(), Fr::zero(), Fr::zero(), Fr::zero()];
+            let r1 = [Fr::one(), Fr::one(), Fr::one(), Fr::one()];
+            let r1_sub_r0: Vec<Fr> = r1.iter().zip(&r0).map(|(&x, y)| x - y).collect();
+
+            let result_h = compute_h(&vanilla_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_dense = compute_h2(&mle_dense, &r0, &r1_sub_r0).unwrap();
+            let result_h2_sparse = compute_h2(&mle_sparse, &r0, &r1_sub_r0).unwrap();
+
+            assert_eq!(result_h2_dense, result_h2_sparse, "Corner values case: dense vs sparse mismatch");
+            assert_eq!(result_h2_dense.coeffs(), result_h.coeffs(), "Corner values case: h2_dense vs h mismatch");
+            
+            // Verify the interpolation property: h(0) should be MLE(r0) and h(1) should be MLE(r1)
+            assert_eq!(result_h.evaluate(&Fr::zero()), Fr::from(10), "h(0) should equal MLE(r0)");
+            assert_eq!(result_h.evaluate(&Fr::one()), Fr::from(20), "h(1) should equal MLE(r1)");
+        }
     }
 }

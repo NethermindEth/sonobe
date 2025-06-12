@@ -7,11 +7,20 @@ use folding_schemes::commitment::hyrax::HyraxGenerators;
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::Curve;
-use matrex::Matrix;
+use matrex::{Matrix, MatrixSize, SparseMatrix};
 use rand::{Rng, RngCore};
 use std::time::{Duration, Instant};
 
 const NUM_OF_PRECONDITION_FOLDS: &[usize] = &[1, 10, 20, 40];
+
+fn dense_to_sparse_vec<C: Curve>(input: &[C::ScalarField]) -> Vec<(usize, C::ScalarField)> {
+    input
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| **x != C::ScalarField::from(0))
+        .map(|(i, x)| (i, *x))
+        .collect()
+}
 
 fn random_sparse_matrix<C: Curve>(n: usize, rng: &mut impl RngCore) -> Matrix<C::ScalarField> {
     let elements = (0..n)
@@ -39,7 +48,11 @@ fn get_instances<C: Curve>(
             // B matrix
             let b = random_sparse_matrix::<C>(n, rng);
             // C = A * B matrix
-            let c = (&a * &b).unwrap();
+            let c: Matrix<C::ScalarField> = (&a * &b).unwrap();
+            // Enforce sparse matrices
+            let c = if c.is_dense() {
+                Matrix::Sparse(SparseMatrix::from_vec(dense_to_sparse_vec::<C>(c.as_dense_slice().unwrap()), c.rows(), c.cols()).unwrap())
+            } else { c };
             // Error matrix initialized to 0s
             let e = Matrix::zero(n, n);
 
@@ -58,17 +71,15 @@ fn get_instances<C: Curve>(
 fn bench_mova_matrix(c: &mut Criterion) {
     let mut group = c.benchmark_group("mova_matrix_sequential_folding");
     let mut rng = ark_std::test_rng();
-    let mat_dim = 8; // 4x4 matrices
+    let mat_dim = 16; // Must be a power of 2
 
     for count in NUM_OF_PRECONDITION_FOLDS {
         group
             .measurement_time(Duration::from_secs(20 * (*count as u64)))
             .bench_function(&format!("{count}"), |b| {
                 // Set up transcript and commitment scheme
-                let hyrax_params = HyraxGenerators::<Projective>::setup(
-                    &mut rng,
-                    log2(mat_dim * mat_dim) as usize,
-                );
+                let hyrax_params =
+                    HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
                 let poseidon_config = poseidon_canonical_config::<Fr>();
                 let pp_hash = Fr::rand(&mut rng);
 

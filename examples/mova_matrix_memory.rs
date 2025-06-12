@@ -71,8 +71,7 @@ fn bench_mova_matrix() {
         println!("Starting with pedersen setup");
 
         let start = Instant::now();
-        let hyrax_params =
-            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
         let hyrax_elapsed = start.elapsed();
         println!("hyrax_elapsed 1 {:?}", hyrax_elapsed);
 

@@ -512,7 +512,7 @@ pub mod tests {
 
         // Set up transcript and commitment scheme
         let hyrax_params =
-            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
+            HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim as usize);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
@@ -561,8 +561,7 @@ pub mod tests {
         let mat_dim = 16; // 16x16 matrices
 
         // Set up transcript and commitment scheme
-        let hyrax_params =
-            HyraxGenerators::<Projective>::setup(&mut rng, log2(mat_dim * mat_dim) as usize);
+        let hyrax_params = HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
         let poseidon_config = poseidon_canonical_config::<Fr>();
         let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
         let mut transcript_v = PoseidonSponge::<Fr>::new(&poseidon_config);
