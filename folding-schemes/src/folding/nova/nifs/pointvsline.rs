@@ -413,7 +413,7 @@ fn compute_h2<F: PrimeField>(
                     let mut current_degree = 0;
 
                     // Multiply by the linear factor for each variable
-                    for i in 0..n_vars {
+                    for (i, _) in linear_factors.iter().enumerate().take(n_vars) {
                         let bit_i = (index >> i) & 1 == 1;
                         let (const_term, linear_term) = if bit_i {
                             // If bit_i == 1, use r1_i + r2_sub_r1_i * x
