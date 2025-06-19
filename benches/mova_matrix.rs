@@ -85,52 +85,55 @@ fn bench_mova_matrix(c: &mut Criterion) {
     for count in NUM_OF_PRECONDITION_FOLDS {
         group
             .measurement_time(Duration::from_secs(20 * (*count as u64)))
-            .bench_function(&format!("{count}"), |b| {
-                // Set up transcript and commitment scheme
-                let hyrax_params =
-                    HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
-                let poseidon_config = poseidon_canonical_config::<Fr>();
-                let pp_hash = Fr::rand(&mut rng);
+            .bench_function(
+                &format!("mova_matrix_sequential_folding/size={mat_dim}x{mat_dim}/n_folds={count}"),
+                |b| {
+                    // Set up transcript and commitment scheme
+                    let hyrax_params =
+                        HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
+                    let poseidon_config = poseidon_canonical_config::<Fr>();
+                    let pp_hash = Fr::rand(&mut rng);
 
-                b.iter_custom(|iters| {
-                    let mut total_duration = Duration::ZERO;
-                    for _ in 0..iters {
-                        let mut instances: Vec<(
-                            Witness<Projective>,
-                            RelaxedCommittedRelation<Projective>,
-                        )> = get_instances::<Projective>(
-                            count + 1, // we want the number of folds plus one for the acc_instance
-                            mat_dim,
-                            &mut rng,
-                            &hyrax_params,
-                        );
-                        let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
-                        let mut acc = instances.pop().unwrap();
+                    b.iter_custom(|iters| {
+                        let mut total_duration = Duration::ZERO;
+                        for _ in 0..iters {
+                            let mut instances: Vec<(
+                                Witness<Projective>,
+                                RelaxedCommittedRelation<Projective>,
+                            )> = get_instances::<Projective>(
+                                count + 1, // we want the number of folds plus one for the acc_instance
+                                mat_dim,
+                                &mut rng,
+                                &hyrax_params,
+                            );
+                            let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
+                            let mut acc = instances.pop().unwrap();
 
-                        for _ in 0..*count {
-                            let mut next = instances.pop().unwrap();
-                            total_duration += {
-                                let timer = Instant::now();
+                            for _ in 0..*count {
+                                let mut next = instances.pop().unwrap();
+                                total_duration += {
+                                    let timer = Instant::now();
 
-                                let (wit_acc, inst_acc, _) =
-                                    NIFS::<Projective, PoseidonSponge<Fr>>::prove(
-                                        &mut transcript_p,
-                                        pp_hash,
-                                        &mut next.0,
-                                        &next.1,
-                                        &acc.0,
-                                        &acc.1,
-                                    )
-                                    .unwrap();
-                                let time = timer.elapsed();
-                                acc = (wit_acc, inst_acc);
-                                time
-                            };
+                                    let (wit_acc, inst_acc, _) =
+                                        NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+                                            &mut transcript_p,
+                                            pp_hash,
+                                            &mut next.0,
+                                            &next.1,
+                                            &acc.0,
+                                            &acc.1,
+                                        )
+                                        .unwrap();
+                                    let time = timer.elapsed();
+                                    acc = (wit_acc, inst_acc);
+                                    time
+                                };
+                            }
                         }
-                    }
-                    total_duration
-                });
-            });
+                        total_duration
+                    });
+                },
+            );
     }
 }
 
