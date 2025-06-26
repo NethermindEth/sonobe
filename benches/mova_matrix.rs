@@ -7,11 +7,20 @@ use folding_schemes::commitment::hyrax::HyraxGenerators;
 use folding_schemes::folding::nova::nifs::mova_matrix::{RelaxedCommittedRelation, Witness, NIFS};
 use folding_schemes::transcript::poseidon::poseidon_canonical_config;
 use folding_schemes::Curve;
-use matrex::Matrix;
+use matrex::{Matrix, MatrixSize, SparseMatrix};
 use rand::{Rng, RngCore};
 use std::time::{Duration, Instant};
 
 const NUM_OF_PRECONDITION_FOLDS: &[usize] = &[1, 10, 20, 40];
+
+fn dense_to_sparse_vec<C: Curve>(input: &[C::ScalarField]) -> Vec<(usize, C::ScalarField)> {
+    input
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| **x != C::ScalarField::from(0))
+        .map(|(i, x)| (i, *x))
+        .collect()
+}
 
 fn random_sparse_matrix<C: Curve>(n: usize, rng: &mut impl RngCore) -> Matrix<C::ScalarField> {
     let elements = (0..n)
@@ -39,7 +48,20 @@ fn get_instances<C: Curve>(
             // B matrix
             let b = random_sparse_matrix::<C>(n, rng);
             // C = A * B matrix
-            let c = (&a * &b).unwrap();
+            let c: Matrix<C::ScalarField> = (&a * &b).unwrap();
+            // Enforce sparse matrices
+            let c = if c.is_dense() {
+                Matrix::Sparse(
+                    SparseMatrix::from_vec(
+                        dense_to_sparse_vec::<C>(c.as_dense_slice().unwrap()),
+                        c.rows(),
+                        c.cols(),
+                    )
+                    .unwrap(),
+                )
+            } else {
+                c
+            };
             // Error matrix initialized to 0s
             let e = Matrix::zero(n, n);
 
@@ -58,57 +80,60 @@ fn get_instances<C: Curve>(
 fn bench_mova_matrix(c: &mut Criterion) {
     let mut group = c.benchmark_group("mova_matrix_sequential_folding");
     let mut rng = ark_std::test_rng();
-    let mat_dim = 4; // 4x4 matrices
+    let mat_dim = 16; // Must be a power of 2
 
     for count in NUM_OF_PRECONDITION_FOLDS {
         group
             .measurement_time(Duration::from_secs(20 * (*count as u64)))
-            .bench_function(&format!("{count}"), |b| {
-                // Set up transcript and commitment scheme
-                let hyrax_params =
-                    HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
-                let poseidon_config = poseidon_canonical_config::<Fr>();
-                let pp_hash = Fr::rand(&mut rng);
+            .bench_function(
+                &format!("mova_matrix_sequential_folding/size={mat_dim}x{mat_dim}/n_folds={count}"),
+                |b| {
+                    // Set up transcript and commitment scheme
+                    let hyrax_params =
+                        HyraxGenerators::<Projective>::setup(&mut rng, mat_dim * mat_dim);
+                    let poseidon_config = poseidon_canonical_config::<Fr>();
+                    let pp_hash = Fr::rand(&mut rng);
 
-                b.iter_custom(|iters| {
-                    let mut total_duration = Duration::ZERO;
-                    for _ in 0..iters {
-                        let mut instances: Vec<(
-                            Witness<Projective>,
-                            RelaxedCommittedRelation<Projective>,
-                        )> = get_instances::<Projective>(
-                            count + 1, // we want the number of folds plus one for the acc_instance
-                            mat_dim,
-                            &mut rng,
-                            &hyrax_params,
-                        );
-                        let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
-                        let mut acc = instances.pop().unwrap();
+                    b.iter_custom(|iters| {
+                        let mut total_duration = Duration::ZERO;
+                        for _ in 0..iters {
+                            let mut instances: Vec<(
+                                Witness<Projective>,
+                                RelaxedCommittedRelation<Projective>,
+                            )> = get_instances::<Projective>(
+                                count + 1, // we want the number of folds plus one for the acc_instance
+                                mat_dim,
+                                &mut rng,
+                                &hyrax_params,
+                            );
+                            let mut transcript_p = PoseidonSponge::<Fr>::new(&poseidon_config);
+                            let mut acc = instances.pop().unwrap();
 
-                        for _ in 0..*count {
-                            let mut next = instances.pop().unwrap();
-                            total_duration += {
-                                let timer = Instant::now();
+                            for _ in 0..*count {
+                                let mut next = instances.pop().unwrap();
+                                total_duration += {
+                                    let timer = Instant::now();
 
-                                let (wit_acc, inst_acc, _) =
-                                    NIFS::<Projective, PoseidonSponge<Fr>>::prove(
-                                        &mut transcript_p,
-                                        pp_hash,
-                                        &mut next.0,
-                                        &next.1,
-                                        &acc.0,
-                                        &acc.1,
-                                    )
-                                    .unwrap();
-                                let time = timer.elapsed();
-                                acc = (wit_acc, inst_acc);
-                                time
-                            };
+                                    let (wit_acc, inst_acc, _) =
+                                        NIFS::<Projective, PoseidonSponge<Fr>>::prove(
+                                            &mut transcript_p,
+                                            pp_hash,
+                                            &mut next.0,
+                                            &next.1,
+                                            &acc.0,
+                                            &acc.1,
+                                        )
+                                        .unwrap();
+                                    let time = timer.elapsed();
+                                    acc = (wit_acc, inst_acc);
+                                    time
+                                };
+                            }
                         }
-                    }
-                    total_duration
-                });
-            });
+                        total_duration
+                    });
+                },
+            );
     }
 }
 
