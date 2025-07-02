@@ -4,6 +4,7 @@ use ark_ff::PrimeField;
 use ark_r1cs_std::{boolean::Boolean, fields::fp::FpVar, groups::CurveVar};
 use ark_relations::r1cs::SynthesisError;
 
+pub mod merlin;
 pub mod poseidon;
 
 /// An interface for objects that can be absorbed by a `Transcript`.
